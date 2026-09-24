@@ -6,3 +6,9 @@ allowBuilds:
   sharp: set this to true or false
   unrs-resolver: set this to true or false
   workerd: set this to true or false
+
+onlyBuiltDependencies:
+  - esbuild
+  - sharp
+  - unrs-resolver
+  - workerd
