@@ -1,0 +1,13 @@
+{
+  "pec-omni": { "label": "PEC / OMNI", "direction": "higher", "target": 0.99, "scoreWeight": null, "sheetAlias": "pec omni" },
+  "medallia": { "label": "Medallia", "direction": "higher", "target": 0.93, "scoreWeight": null, "sheetAlias": "medallia", "minimumResponses": 25 },
+  "plataforma-logistica": { "label": "Plataforma Logística", "direction": "higher", "target": 0.93, "scoreWeight": null, "sheetAlias": "plataforma logistica" },
+  "recebimento": { "label": "Recebimento", "direction": "higher", "target": 1, "scoreWeight": null, "sheetAlias": "recebimento", "slaDays": 2, "strictTarget": true },
+  "arruamento": { "label": "Arruamento", "direction": "higher", "target": 0.92, "scoreWeight": null, "sheetAlias": "arruamento" },
+  "retirada": { "label": "Retirada", "direction": "lower", "target": 3, "scoreWeight": null, "sheetAlias": "retirada", "unit": "count" },
+  "trilogo": { "label": "Chamados Sfera", "direction": "lower", "target": 2, "scoreWeight": null, "sheetAlias": "chamados sfera", "unit": "count" },
+  "quebra-estoque": { "label": "Quebra de Estoque", "direction": "lower", "target": 0.01, "scoreWeight": null, "sheetAlias": "quebra de estoque" },
+  "saldo-pedidos": { "label": "Saldo de Pedidos", "direction": "higher", "target": 1, "scoreWeight": null, "sheetAlias": "saldo de pedidos" },
+  "retirada-cancelados": { "label": "Retirada Cancelados", "direction": "lower", "target": 0.02, "scoreWeight": null, "sheetAlias": "retirada cancelados" },
+  "entrega-cancelados": { "label": "Entrega Cancelados", "direction": "lower", "target": 0.02, "scoreWeight": null, "sheetAlias": "entrega cancelados" }
+}
