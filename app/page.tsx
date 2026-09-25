@@ -43,7 +43,18 @@ type DashboardData = {
   stores: Array<{ store: string; storeCode: string | null; indicators: Record<string, Result> }>;
   alerts: Array<Result & { store: string; storeCode?: string | null; indicator: string }>;
   quality: { issues: Array<{ severity: string; code: string; message: string; indicator?: string }>; summary: Record<string, number> };
-  orders?: { source: { fileName: string; modifiedAt: string; lastImportAt?: string }; period: { start: string | null; end: string | null; days: number }; stores: Array<{ store: string; storeCode: string; total: number; retirada: number; entrega: number; revendedor: number; omni: number; revendedorCategorias?: Record<string, number>; cancelamentoMotivos?: Record<string, [number, number]>; cancelamentoFiscal?: Record<string, [number, number]>; pctEntrega: number; pctRetirada: number; retiradaCancelados: number; entregaCancelados: number; itens: number; mediaRetirada: number; mediaEntrega: number; mediaOmni: number; mediaItens: number }>; daily?: Array<{ date: string; store: string; storeCode: string; total: number; retirada: number; entrega: number; revendedor: number; omni: number; retiradaCancelados: number; entregaCancelados: number; itens: number; revendedorCategorias?: Record<string, number>; cancelamentoMotivos?: Record<string, [number, number]>; cancelamentoFiscal?: Record<string, [number, number]> }> } | null;
+  orders?: { source: { fileName: string; modifiedAt: string; lastImportAt?: string }; period: { start: string | null; end: string | null; days: number }; stores: Array<{ store: string; storeCode: string; total: number; retirada: number; entrega: number; revendedor: number; omni: number; revendedorCategorias?: Record<string, number>; cancelamentoMotivos?: Record<string, [number, number]>; cancelamentoFiscal?: Record<string, [number, number]>; pctEntrega: number; pctRetirada: number; retiradaCancelados: number; entregaCancelados: number; itens: number; mediaRetirada: number; mediaEntrega: number; mediaOmni: number; mediaItens: number }>; daily?: Array<{ date: string; store: string; storeCode: string; total: number; retirada: number; entrega: number; revendedor: number; omni: number; retiradaCancelados: number; entregaCancelados: number; itens: number; revendedorCategorias?: Record<string, number>; cancelamentoMotivos?: Record<string, [number, number]>; cancelamentoFiscal?: Record<string, [number, number]> }>; records?: OrderRecord[] } | null;
+};
+
+type OrderRecord = {
+  orderCode: string;
+  reseller: string;
+  channel: string;
+  role: string;
+  city: string;
+  value: number;
+  date: string | null;
+  canceled?: boolean;
 };
 
 const percent = new Intl.NumberFormat("pt-BR", { style: "percent", maximumFractionDigits: 2 });
@@ -580,6 +591,31 @@ function OrdersView({ data, selectedStore, cycle, startDate, endDate, onImported
     <section className="panel orders-results-panel"><div className="section-title"><div><h2>Resultados por loja</h2><p>Comparativo detalhado, ordenado pelo total de pedidos.</p></div><span className="table-hint">Deslize para ver todas as colunas</span></div><div className="table-wrap orders-table-wrap"><table className="orders-table"><thead><tr className="group-row"><th rowSpan={2}>Loja / código</th><th colSpan={5}>Pedidos por canal</th><th colSpan={2}>Participação</th><th colSpan={2}>Cancelados</th><th rowSpan={2}>Itens</th></tr><tr><th>Total</th><th>Retirada</th><th>Entrega</th><th>Revendedor</th><th>OMNI</th><th>% entrega</th><th>% retirada</th><th>Retirada</th><th>Entrega</th></tr></thead><tbody>{rows.filter((r) => r.storeCode !== "21732").map((r) => <tr key={r.store}><th className="store-cell"><strong>{r.store}</strong><small>{r.storeCode || "—"}</small></th><td className="emphasis-cell">{integer.format(r.total)}</td><td>{integer.format(r.retirada)}</td><td>{integer.format(r.entrega)}</td><td>{integer.format(r.revendedor)}</td><td>{integer.format(r.omni)}</td><td className="percent-cell">{percent.format(r.pctEntrega)}</td><td className="percent-cell">{percent.format(r.pctRetirada)}</td><td>{integer.format(r.retiradaCancelados)}</td><td>{integer.format(r.entregaCancelados)}</td><td>{integer.format(r.itens)}</td></tr>)}</tbody></table></div></section>
   </>;
 }
+
+function OrderRecurrenceView({ data, startDate, endDate }: { data: DashboardData; startDate: string; endDate: string }) {
+  const records = data.orders?.records || [];
+  const [city, setCity] = useState("");
+  const [name, setName] = useState("");
+  const [countOrder, setCountOrder] = useState<"desc" | "asc">("desc");
+  const [valueOrder, setValueOrder] = useState<"none" | "desc" | "asc">("none");
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const cities = [...new Set(records.map((item) => item.city).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR"));
+  const inRange = (date: string | null) => (!startDate || Boolean(date) && date! >= startDate) && (!endDate || Boolean(date) && date! <= endDate);
+  const filtered = records.filter((item) => !item.canceled && inRange(item.date) && (!city || item.city === city) && (!name || normalizeText(item.reseller).includes(normalizeText(name))));
+  const ranking = [...new Map(filtered.map((item) => [item.reseller, item])).values()].map((item) => {
+    const personOrders = filtered.filter((row) => row.reseller === item.reseller);
+    return { reseller: item.reseller, channel: item.channel || "—", role: item.role || "—", city: item.city || "—", totalValue: personOrders.reduce((sum, row) => sum + Number(row.value || 0), 0), count: personOrders.length, orders: personOrders };
+  }).sort((a, b) => countOrder === "desc" ? b.count - a.count || b.totalValue - a.totalValue : a.count - b.count || a.totalValue - b.totalValue);
+  if (valueOrder !== "none") ranking.sort((a, b) => valueOrder === "desc" ? b.totalValue - a.totalValue || b.count - a.count : a.totalValue - b.totalValue || a.count - b.count);
+  const totalValue = filtered.reduce((sum, item) => sum + Number(item.value || 0), 0);
+  const period = startDate || endDate ? `${formatDay(startDate) || "início"} a ${formatDay(endDate) || "fim"}` : "Toda a planilha acumulada";
+  return <>
+    <section className="page-head"><div><span className="eyebrow">Pedidos</span><h1>Recorrência de pedidos</h1><p>Ranking de revendedores no período selecionado. Cada importação semanal é somada ao histórico anterior.</p></div><span className="data-chip">Período: {period}</span></section>
+    <section className="panel recurrence-filters"><div className="section-title"><div><h2>Filtros da recorrência</h2><p>Sem filtro de data, o ranking considera toda a planilha acumulada.</p></div><span className="table-hint">Cancelados não entram na contagem</span></div><div className="recurrence-filter-grid"><label>Revendedor<input value={name} onChange={(event) => setName(event.target.value)} placeholder="Buscar por nome" /></label><label>Cidade<select value={city} onChange={(event) => setCity(event.target.value)}><option value="">Todas as cidades</option>{cities.map((item) => <option key={item} value={item}>{item}</option>)}</select></label><label>Pedidos<select value={countOrder} onChange={(event) => setCountOrder(event.target.value as "desc" | "asc")}><option value="desc">Mais pedidos primeiro</option><option value="asc">Menos pedidos primeiro</option></select></label><label>Valor gasto<select value={valueOrder} onChange={(event) => setValueOrder(event.target.value as "none" | "desc" | "asc")}><option value="none">Sem ordenar por valor</option><option value="desc">Mais caro primeiro</option><option value="asc">Mais barato primeiro</option></select></label></div></section>
+    <section className="summary-grid three recurrence-summary"><article><span>Pessoas no ranking</span><strong>{integer.format(ranking.length)}</strong><small>Após filtros</small></article><article><span>Pedidos no período</span><strong>{integer.format(filtered.length)}</strong><small>Importações acumuladas</small></article><article><span>Valor total</span><strong>{totalValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</strong><small>Pedidos não cancelados</small></article></section>
+    <section className="panel recurrence-panel"><div className="section-title"><div><h2>Ranking de recorrência</h2><p>Selecione uma pessoa para abrir os pedidos individualmente.</p></div><span className="table-hint">{integer.format(ranking.length)} resultados</span></div>{!records.length ? <div className="recurrence-empty"><Users size={24} /><strong>Importe a primeira planilha semanal</strong><p>Quando a planilha de pedidos for importada, os novos registros serão adicionados ao histórico e aparecerão neste ranking.</p></div> : !ranking.length ? <p className="muted">Nenhum pedido encontrado para os filtros selecionados.</p> : <div className="table-wrap recurrence-table-wrap"><table className="recurrence-table"><thead><tr><th>Revendedor</th><th>Canal de distribuição</th><th>Papel</th><th>Cidade</th><th>Total gasto</th><th>Pedidos</th><th aria-label="Detalhes" /></tr></thead><tbody>{ranking.map((person) => <><tr key={person.reseller} className={expanded === person.reseller ? "is-expanded" : ""} onClick={() => setExpanded(expanded === person.reseller ? null : person.reseller)}><th><strong>{person.reseller}</strong></th><td>{person.channel}</td><td>{person.role}</td><td>{person.city}</td><td className="emphasis-cell">{person.totalValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</td><td className="emphasis-cell">{integer.format(person.count)}</td><td><ChevronRight size={16} className={expanded === person.reseller ? "rotate-90" : ""} /></td></tr>{expanded === person.reseller && <tr className="recurrence-details-row"><td colSpan={7}><div className="recurrence-details"><strong>Pedidos de {person.reseller}</strong><table><thead><tr><th>Código do pedido</th><th>Data de captação</th><th>Valor</th></tr></thead><tbody>{person.orders.map((order) => <tr key={`${person.reseller}-${order.orderCode}-${order.date}`}><td>{order.orderCode}</td><td>{formatDay(order.date) || "—"}</td><td>{Number(order.value || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</td></tr>)}</tbody></table></div></td></tr>}</>)}</tbody></table></div>}</section>
+  </>;
+}
 const TEMP_PASSWORD = "Sfera@2026";
 type AccessUser = { id: string; name: string; email: string; phone?: string; company?: string; accountType: "admin" | "unit"; stores: string[]; password?: string; mustChangePassword?: boolean; resetNotice?: string; status: "pending" | "approved" | "rejected" | "inactive"; requestedAt?: string; active: boolean };
 type PasswordResetRequest = { id: string; userId: string; name: string; email: string; requestedAt: string; status: "pending" | "approved" | "rejected" };
@@ -850,7 +886,7 @@ export default function Home() {
   const evolutionIndicator = filteredIndicators.find((item) => item.trend.length > 1) || chosen;
   const nav = [
     ["overview", "Visão Geral", LayoutDashboard], ["stores", "360° Por Loja", Store],
-    ["ranking", "Ranking", Trophy], ["performance", "Pedidos", CircleGauge],
+    ["ranking", "Ranking", Trophy], ["performance", "Pedidos", CircleGauge], ["recurrence", "Recorrência", Users],
     ["quality", "Qualidade dos dados", Database], ["cadastro", "Usuários", Users], ["profile", "Meu perfil", UserCircle], ["settings", "Configurações", Settings],
   ] as const;
 
@@ -920,6 +956,8 @@ export default function Home() {
           {view === "ranking" && <><section className="page-head"><div><span className="eyebrow">Benchmark interno</span><h1>Ranking de Lojas</h1><p>Melhores e piores resultados por indicador.</p></div></section><article className="panel attention ranking-priority-card"><div className="section-title"><div><h2>Prioridade de ação</h2><p>Ocorrências fora da meta, ordenadas pelo maior desvio.</p></div></div><div className="alert-list">{priorityAlerts.map((item, index) => <button key={`${item.store}-${item.indicator}-${index}`} onClick={() => openStore(item.store)}><AlertTriangle size={17} /><span><strong>{item.store} <small>{item.storeCode}</small></strong><small>{workingData.indicators[item.indicator]?.label} • {formatResult(item, item.indicator)} • {formatGap(item.gap, item.indicator)}</small></span><ChevronRight size={16} /></button>)}{!priorityAlerts.length && <p className="muted">Nenhuma ocorrência crítica calculável.</p>}</div></article><div className="indicator-panels">{filteredIndicators.map((item) => <article className="panel" key={item.id}><h2>{item.label}</h2><Ranking indicator={item} onStore={openStore} /></article>)}</div></>}
 
           {view === "performance" && <OrdersView data={data} selectedStore={store} cycle={cycle} startDate={startDate} endDate={endDate} onImported={() => load(true)} />}
+
+          {view === "recurrence" && <OrderRecurrenceView data={data} startDate={startDate} endDate={endDate} />}
 
           {view === "quality" && <><section className="page-head"><div><span className="eyebrow">Governança</span><h1>Qualidade dos Dados</h1><p>Problemas registrados sem interromper o restante do dashboard.</p></div></section><section className="summary-grid three"><article><span>Críticos</span><strong>{data.quality.summary.critical || 0}</strong></article><article><span>Altos</span><strong>{data.quality.summary.high || 0}</strong></article><article><span>Médios</span><strong>{data.quality.summary.medium || 0}</strong></article></section><section className="panel issue-list">{data.quality.issues.slice(0, 100).map((item, index) => <div key={index}><span className={`severity ${item.severity}`}>{item.severity}</span><strong>{item.message}</strong><small>{item.indicator ? data.indicators[item.indicator]?.label : item.code}</small></div>)}</section></>}
 

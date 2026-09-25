@@ -347,7 +347,37 @@ button:focus-visible, select:focus-visible { outline: 3px solid #9eb0f0; outline
 .orders-table .store-cell small { color: var(--muted); font-size: 10px; font-weight: 600; }
 .orders-table .emphasis-cell { color: var(--ink); font-weight: 850; }
 .orders-table .percent-cell { color: var(--blue); font-weight: 750; }
+.recurrence-filters { overflow: visible; }
+.recurrence-filter-grid { display: grid; grid-template-columns: 1.3fr repeat(3, minmax(170px, 1fr)); gap: 12px; }
+.recurrence-filter-grid label { display: grid; gap: 6px; color: var(--muted); font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+.recurrence-filter-grid input, .recurrence-filter-grid select { width: 100%; height: 38px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); padding: 0 10px; font: inherit; font-size: 12px; text-transform: none; letter-spacing: 0; }
+.recurrence-summary article { min-height: 100px; }
+.recurrence-summary article small { color: var(--muted); font-size: 11px; }
+.recurrence-panel { overflow: hidden; }
+.recurrence-table-wrap { max-height: 640px; margin-top: 14px; border: 1px solid var(--line); border-radius: 10px; overflow: auto; }
+.recurrence-table { width: 100%; min-width: 920px; border-collapse: separate; border-spacing: 0; background: #fff; }
+.recurrence-table thead { position: sticky; top: 0; z-index: 3; }
+.recurrence-table th, .recurrence-table td { padding: 13px 14px; border-bottom: 1px solid #edf0f4; text-align: left; white-space: nowrap; font-size: 12px; }
+.recurrence-table thead th { background: #f3f5f8; color: #53627a; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .035em; }
+.recurrence-table tbody tr:not(.recurrence-details-row) { cursor: pointer; transition: background .16s ease; }
+.recurrence-table tbody tr:not(.recurrence-details-row):hover, .recurrence-table tbody tr.is-expanded { background: #f2f6ff; }
+.recurrence-table tbody tr:last-child th, .recurrence-table tbody tr:last-child td { border-bottom: 0; }
+.recurrence-table .emphasis-cell { font-weight: 800; color: var(--ink); }
+.recurrence-table svg { color: #8b9ab1; transition: transform .16s ease; }
+.recurrence-table svg.rotate-90 { transform: rotate(90deg); }
+.recurrence-details-row td { padding: 0; background: #f8faff; }
+.recurrence-details { padding: 14px 18px 18px 48px; border-bottom: 1px solid #dfe7f4; }
+.recurrence-details > strong { display: block; margin-bottom: 10px; color: var(--blue); font-size: 12px; }
+.recurrence-details table { width: min(620px, 100%); border-collapse: collapse; background: #fff; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.recurrence-details th, .recurrence-details td { padding: 8px 10px; border-bottom: 1px solid #edf0f4; font-size: 11px; text-align: left; }
+.recurrence-details thead th { color: var(--muted); background: #f3f5f8; font-size: 10px; text-transform: uppercase; }
+.recurrence-details tbody tr:last-child td { border-bottom: 0; }
+.recurrence-empty { min-height: 220px; display: grid; place-items: center; align-content: center; gap: 8px; padding: 32px; color: var(--muted); text-align: center; }
+.recurrence-empty svg { color: var(--blue); }
+.recurrence-empty strong { color: var(--ink); font-size: 16px; }
+.recurrence-empty p { max-width: 520px; margin: 0; font-size: 12px; }
 @media (max-width: 700px) { .table-hint { display: none; } .orders-table-wrap { max-height: 480px; } }
+@media (max-width: 900px) { .recurrence-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .auth-shell { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: linear-gradient(rgba(18,48,86,.78), rgba(18,48,86,.78)), url('/sfera-logo.png') center/cover no-repeat; }
 .topbar-actions { display: flex; align-items: center; gap: 8px; }
 .topbar .topbar-actions { display: flex; align-items: center; gap: 8px; margin-left: 0; white-space: nowrap; }
