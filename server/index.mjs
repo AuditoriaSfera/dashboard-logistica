@@ -54,7 +54,12 @@ function mergeOrderSummaries(previous, current) {
   }
   const days = Math.max(1, new Set([...(previous.daily || []), ...(current.daily || [])].map((item) => item.date)).size);
   const mergedStores = [...stores.values()].map((item) => ({ ...item, pctEntrega: item.total ? item.entrega / item.total : 0, pctRetirada: item.total ? item.retirada / item.total : 0, mediaRetirada: item.retirada / days, mediaEntrega: item.entrega / days, mediaOmni: item.omni / days, mediaItens: item.itens / days })).sort((a, b) => b.total - a.total);
-  return { ...current, source: { ...current.source, lastImportAt: new Date().toISOString() }, period: { start: [previous.period?.start, current.period?.start].filter(Boolean).sort()[0] || null, end: [previous.period?.end, current.period?.end].filter(Boolean).sort().at(-1) || null, days }, stores: mergedStores, daily: [...(previous.daily || []), ...(current.daily || [])] };
+  const recordMap = new Map();
+  for (const record of [...(previous.records || []), ...(current.records || [])]) {
+    const key = String(record.orderCode || `${record.storeCode || record.store}|${record.date || ""}|${record.reseller || ""}|${record.value || 0}`);
+    if (!recordMap.has(key)) recordMap.set(key, record);
+  }
+  return { ...current, source: { ...current.source, lastImportAt: new Date().toISOString() }, period: { start: [previous.period?.start, current.period?.start].filter(Boolean).sort()[0] || null, end: [previous.period?.end, current.period?.end].filter(Boolean).sort().at(-1) || null, days }, stores: mergedStores, daily: [...(previous.daily || []), ...(current.daily || [])], records: [...recordMap.values()] };
 }
 
 function usableOrderTotal(snapshot) {

@@ -51,9 +51,11 @@ def parse(path):
     c_cancel = col('SituaçãoComercial'); c_reason = col('DetalheSituaçãoComercial','Detalhe Situacao Comercial')
     c_fiscal = col('SituaçãoFiscal','Situacao Fiscal'); c_role = col('Papel'); c_meio = col('MeioCaptacao')
     c_items = col('QtdeItens'); c_date = col('Data Captação')
+    c_order = col('CodigoPedido', 'Código Pedido'); c_name = col('NomePessoa', 'Pessoa')
+    c_city = col('Cidade'); c_value = col('ValorPedido', 'ValorTotalSemCCR', 'ValorLiquido')
     required = [c_source,c_type,c_cancel,c_role,c_items,c_date]
     if any(v is None for v in required): raise RuntimeError('A aba Pag não possui todas as colunas necessárias.')
-    buckets = {}; daily = {}; dates = set()
+    buckets = {}; daily = {}; dates = set(); records = []
     def new_bucket(code):
         return {'store':canonical[code],'storeCode':code,'total':0,'retirada':0,'entrega':0,'revendedor':0,'omni':0,'revendedorCategorias':{},'cancelamentoMotivos':{},'cancelamentoFiscal':{},'retiradaCancelados':0,'entregaCancelados':0,'itens':0}
     def apply_row(b, row, retirada, cancelled):
@@ -88,6 +90,21 @@ def parse(path):
         cancelled = 'cancelado' in norm(row[c_cancel])
         b = buckets.setdefault(code, new_bucket(code))
         apply_row(b, row, retirada, cancelled)
+        # Mantemos o detalhe de cada pedido para o ranking de recorrência.
+        # Registros cancelados permanecem disponíveis para auditoria, mas a interface não os contabiliza.
+        cycle_value = row[col('CicloIndicador')] if col('CicloIndicador') is not None else None
+        records.append({
+            'orderCode': str(row[c_order] if c_order is not None and row[c_order] is not None else ''),
+            'reseller': str(row[c_name] if c_name is not None and row[c_name] is not None else 'Não informado'),
+            'channel': str(row[c_source] if row[c_source] is not None else ''),
+            'role': str(row[c_role] if row[c_role] is not None else ''),
+            'city': str(row[c_city] if c_city is not None and row[c_city] is not None else ''),
+            'value': num(row[c_value] if c_value is not None else 0),
+            'date': day_key,
+            'cycle': None,
+            'canceled': cancelled,
+            'store': canonical[code],
+        })
         if day_key:
             db = daily.setdefault(f'{code}|{day_key}', new_bucket(code))
             apply_row(db, row, retirada, cancelled)
@@ -103,6 +120,6 @@ def parse(path):
         b['itens']=int(b['itens']) if b['itens'].is_integer() else b['itens']
         b.update(date=day,pctEntrega=b['entrega']/b['total'] if b['total'] else 0,pctRetirada=b['retirada']/b['total'] if b['total'] else 0)
         daily_result.append(b)
-    st=Path(path).stat(); return {'source':{'path':str(Path(path).resolve()),'fileName':Path(path).name,'modifiedAt':datetime.fromtimestamp(st.st_mtime).isoformat(),'size':st.st_size},'period':{'start':min(dates) if dates else None,'end':max(dates) if dates else None,'days':len(dates)},'stores':result,'daily':daily_result}
+    st=Path(path).stat(); return {'source':{'path':str(Path(path).resolve()),'fileName':Path(path).name,'modifiedAt':datetime.fromtimestamp(st.st_mtime).isoformat(),'size':st.st_size},'period':{'start':min(dates) if dates else None,'end':max(dates) if dates else None,'days':len(dates)},'stores':result,'daily':daily_result,'records':records}
 
 if __name__ == '__main__': print(json.dumps(parse(sys.argv[1]), ensure_ascii=False, separators=(',',':')))
