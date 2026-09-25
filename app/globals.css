@@ -372,6 +372,9 @@ button:focus-visible, select:focus-visible { outline: 3px solid #9eb0f0; outline
 .recurrence-details th, .recurrence-details td { padding: 8px 10px; border-bottom: 1px solid #edf0f4; font-size: 11px; text-align: left; }
 .recurrence-details thead th { color: var(--muted); background: #f3f5f8; font-size: 10px; text-transform: uppercase; }
 .recurrence-details tbody tr:last-child td { border-bottom: 0; }
+.recurrence-pagination { display: flex; align-items: center; justify-content: center; gap: 16px; padding: 16px 0 4px; color: var(--muted); font-size: 13px; }
+.recurrence-pagination button { border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 7px 12px; color: var(--ink); cursor: pointer; }
+.recurrence-pagination button:disabled { opacity: .45; cursor: not-allowed; }
 .recurrence-empty { min-height: 220px; display: grid; place-items: center; align-content: center; gap: 8px; padding: 32px; color: var(--muted); text-align: center; }
 .recurrence-empty svg { color: var(--blue); }
 .recurrence-empty strong { color: var(--ink); font-size: 16px; }
