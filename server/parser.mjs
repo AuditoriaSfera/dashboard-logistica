@@ -652,9 +652,9 @@ export function parseWorkbook(filePath) {
     const orderModifiedAt = orderStat.mtime.toISOString();
     if (ordersMemo?.path === path.resolve(ordersPath) && ordersMemo.modifiedAt === orderModifiedAt) orders = ordersMemo.value;
     else {
-      try { orders = orderStat.size > 50 * 1024 * 1024 ? parseOrdersLargeWorkbook(ordersPath) : parseOrdersWorkbook(ordersPath); }
+      try { orders = orderStat.size > 1 * 1024 * 1024 ? parseOrdersLargeWorkbook(ordersPath) : parseOrdersWorkbook(ordersPath); }
       catch (error) {
-        try { orders = orderStat.size > 50 * 1024 * 1024 ? parseOrdersWorkbook(ordersPath) : parseOrdersLargeWorkbook(ordersPath); }
+        try { orders = orderStat.size > 1 * 1024 * 1024 ? parseOrdersWorkbook(ordersPath) : parseOrdersLargeWorkbook(ordersPath); }
         catch (largeError) { orders = { error: largeError.message || error.message, source: { fileName: path.basename(ordersPath), modifiedAt: orderModifiedAt }, period: { start: null, end: null, days: 0 }, stores: [] }; }
       }
       if (orders && !orders.error) ordersMemo = { path: path.resolve(ordersPath), modifiedAt: orderModifiedAt, value: orders };

@@ -71,6 +71,12 @@ function loadPersistedOrders(cumulativeFile, currentOrders) {
   try {
     const savedOrders = JSON.parse(fs.readFileSync(cumulativeFile, "utf8"));
     if (!savedOrders?.stores?.length) return currentOrders;
+    // Históricos criados antes do ranking detalhado podem ter apenas os
+    // resumos por loja. Preserve esses totais, mas aproveite os registros
+    // detalhados recém-lidos para alimentar a aba Recorrência.
+    if (!(savedOrders.records || []).length && (currentOrders.records || []).length) {
+      return { ...savedOrders, records: currentOrders.records, source: { ...savedOrders.source, ...currentOrders.source } };
+    }
     // Nunca regride para um acumulado menor que o backup de segurança.
     // Isso evita que uma importação parcial substitua todo o histórico.
     const backupFile = new URL("../data/pedidos-cumulativos-duplicado-backup.json", import.meta.url);
