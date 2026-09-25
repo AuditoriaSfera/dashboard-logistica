@@ -55,6 +55,8 @@ button:focus-visible, select:focus-visible { outline: 3px solid #9eb0f0; outline
 .filter-bar label { display: grid; gap: 5px; min-width: 130px; color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
 .filter-bar select, .filter-bar input { height: 36px; min-width: 140px; border: 1px solid #dfe3ea; border-radius: 8px; background: white; padding: 0 10px; color: var(--ink); font-size: 12px; text-transform: none; letter-spacing: 0; }
 .filter-bar select { padding-right: 30px; }
+.filter-bar select[multiple] { height: 74px; padding: 4px 8px; }
+.filter-help { color: var(--muted); font-size: 10px; font-weight: 500; text-transform: none; letter-spacing: 0; }
 .clear { border: 0; background: transparent; color: var(--blue); font-size: 12px; font-weight: 700; padding: 10px; white-space: nowrap; cursor: pointer; }
 .content { position: relative; width: min(1480px, 100%); margin: 0 auto; padding: 28px; display: grid; gap: 24px; }
 .content-logo { display: none; }

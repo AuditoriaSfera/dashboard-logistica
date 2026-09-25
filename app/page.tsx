@@ -108,6 +108,10 @@ function ResultValue({ result, id }: { result: Result | null | undefined; id: st
 }
 const formatTarget = (id: string, value: number | null) => isWithdrawal(id) ? "3 Pedidos" : id === "trilogo" ? `${integer.format(value ?? 2)} Chamados` : formatValue(value, id);
 const normalizeText = (value: unknown) => String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+const matchesStores = (selected: string[] | string, store: string) => {
+  const values = Array.isArray(selected) ? selected : selected ? [selected] : [];
+  return values.length === 0 || values.includes(store);
+};
 const statusFor = (value: number | null, target: number | null, direction: "higher" | "lower", sourceStatus = ""): StatusKey => {
   if (value == null) return "unknown";
   if (target != null) {
@@ -145,7 +149,7 @@ const aggregateRows = (rows: RecordItem[], indicator: Pick<Indicator, "id" | "di
 };
 const periodOf = (row: RecordItem) => row.cycle != null ? String(row.cycle) : row.date || "";
 const recomputeIndicator = (
-  indicator: Pick<Indicator, "id" | "direction" | "configuredTarget" | "generalByCycle">, store: string, cycle: string, startDate: string, endDate: string,
+  indicator: Pick<Indicator, "id" | "direction" | "configuredTarget" | "generalByCycle">, store: string[], cycle: string, startDate: string, endDate: string,
   allStores: Array<{ store: string; storeCode: string | null }>,
 ): Indicator => {
   const recordDate = (row: RecordItem) => (row.date || row.periodEnd || row.periodStart || "").slice(0, 10);
@@ -171,7 +175,7 @@ const recomputeIndicator = (
     }
     const dateForStart = date || rowCyclePeriod?.end || "";
     const dateForEnd = date || rowCyclePeriod?.start || "";
-    return (!store || row.store === store)
+    return matchesStores(store, row.store)
       && matchesCycle
       && (!effectiveStart || Boolean(dateForStart) && dateForStart >= effectiveStart)
       && (!effectiveEnd || Boolean(dateForEnd) && dateForEnd <= effectiveEnd);
@@ -197,7 +201,7 @@ const recomputeIndicator = (
   // de data explícitos ainda limitam a janela histórica.
   const historyRecords = indicator.records.filter((row) => {
     const date = recordDate(row);
-    return (!store || row.store === store)
+    return matchesStores(store, row.store)
       && (!startDate || Boolean(date) && date >= startDate)
       && (!endDate || Boolean(date) && date <= endDate);
   });
@@ -222,8 +226,8 @@ const recomputeIndicator = (
   const current = isWithdrawal(indicator.id)
     ? {
       ...aggregate,
-      value: store ? ranking.find((row) => row.store === store)?.value ?? 0 : null,
-      status: store ? ranking.find((row) => row.store === store)?.status || "unknown" as StatusKey : "unknown" as StatusKey,
+      value: store.length === 1 ? ranking.find((row) => row.store === store[0])?.value ?? 0 : null,
+      status: store.length === 1 ? ranking.find((row) => row.store === store[0])?.status || "unknown" as StatusKey : "unknown" as StatusKey,
     }
     : generalAggregate;
   return { ...indicator, latestKey, records, current, trend, ranking };
@@ -274,7 +278,7 @@ function Filters({
   data, store, setStore, cycle, setCycle, startDate, setStartDate, endDate, setEndDate,
   indicator, setIndicator, status, setStatus,
 }: {
-  data: DashboardData; store: string; setStore: (v: string) => void;
+  data: DashboardData; store: string[]; setStore: (v: string[]) => void;
   cycle: string; setCycle: (v: string) => void; indicator: string; setIndicator: (v: string) => void;
   startDate: string; setStartDate: (v: string) => void; endDate: string; setEndDate: (v: string) => void;
   status: string; setStatus: (v: string) => void;
@@ -290,10 +294,10 @@ function Filters({
       <label>Ciclo<select value={cycle} onChange={(e) => setCycle(e.target.value)}><option value="">Todos</option>{cycleOptions.map((value) => <option key={value} value={value}>Ciclo {value}</option>)}</select></label>
       <label>Data inicial<AvailableDatePicker value={startDate} onChange={(value) => setAvailableDate(value, setStartDate)} dates={uniqueDates} placeholder="dd/mm/aaaa" /></label>
       <label>Data final<AvailableDatePicker value={endDate} onChange={(value) => setAvailableDate(value, setEndDate)} dates={uniqueDates} placeholder="dd/mm/aaaa" /></label>
-      <label>Loja<select value={store} onChange={(e) => setStore(e.target.value)}><option value="">Todas</option>{data.filters.stores.map((value) => { const code = data.stores.find((item) => item.store === value)?.storeCode; return <option key={value} value={value}>{code ? `${code} • ` : ""}{value}</option>; })}</select></label>
+      <label>Loja<select multiple value={store} onChange={(e) => setStore(Array.from(e.target.selectedOptions, (option) => option.value))} aria-label="Selecione uma ou mais lojas">{data.filters.stores.map((value) => { const code = data.stores.find((item) => item.store === value)?.storeCode; return <option key={value} value={value}>{code ? `${code} • ` : ""}{value}</option>; })}</select><small className="filter-help">{store.length ? `${store.length} loja(s) selecionada(s)` : "Todas as lojas"}</small></label>
       <label>Indicador<select value={indicator} onChange={(e) => setIndicator(e.target.value)}><option value="">Todos</option>{data.filters.indicators.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
       <label>Status<select value={status} onChange={(e) => setStatus(e.target.value)}><option value="">Todos</option><option value="good">Dentro da meta</option><option value="warning">Atenção</option><option value="bad">Fora da meta</option><option value="unknown">Sem informação</option></select></label>
-      <button className="clear" onClick={() => { setStore(""); setCycle(""); setStartDate(""); setEndDate(""); setIndicator(""); setStatus(""); }}>Limpar filtros</button>
+      <button className="clear" onClick={() => { setStore([]); setCycle(""); setStartDate(""); setEndDate(""); setIndicator(""); setStatus(""); }}>Limpar filtros</button>
     </section>
   );
 }
@@ -495,7 +499,7 @@ function Matrix({ data, onStore }: { data: DashboardData; onStore: (store: strin
   );
 }
 
-function OrdersView({ data, selectedStore, cycle, startDate, endDate, onImported }: { data: DashboardData; selectedStore: string; cycle: string; startDate: string; endDate: string; onImported: () => Promise<void> }) {
+function OrdersView({ data, selectedStore, cycle, startDate, endDate, onImported }: { data: DashboardData; selectedStore: string[]; cycle: string; startDate: string; endDate: string; onImported: () => Promise<void> }) {
   const orders = data.orders;
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
@@ -543,7 +547,7 @@ function OrdersView({ data, selectedStore, cycle, startDate, endDate, onImported
   const outsidePeriod = Boolean((filterStart && periodEnd && filterStart > periodEnd) || (filterEnd && periodStart && filterEnd < periodStart) || (filterStart && filterEnd && filterStart > filterEnd));
   const inRange = (date: string) => (!filterStart || date >= filterStart) && (!filterEnd || date <= filterEnd);
   const selectedDaily = !outsidePeriod && orders.daily?.length
-    ? orders.daily.filter((item) => inRange(item.date) && (!selectedStore || item.store === selectedStore))
+    ? orders.daily.filter((item) => inRange(item.date) && matchesStores(selectedStore, item.store))
     : [];
   // Sem filtro de data, o resumo deve usar o agregado por loja persistido.
   // A série diária é usada somente quando o usuário escolhe um intervalo.
@@ -557,7 +561,7 @@ function OrdersView({ data, selectedStore, cycle, startDate, endDate, onImported
         for (const [key, value] of Object.entries(item.cancelamentoFiscal || {})) { const pair = value as [number, number]; const prev = current.cancelamentoFiscal?.[key] || [0, 0]; current.cancelamentoFiscal = { ...(current.cancelamentoFiscal || {}), [key]: [prev[0] + pair[0], prev[1] + pair[1]] }; }
         map.set(item.storeCode, current); return map;
       }, new Map<string, any>()).values()].map((item) => ({ ...item, pctEntrega: item.total ? item.entrega / item.total : 0, pctRetirada: item.total ? item.retirada / item.total : 0 }))
-    : (outsidePeriod ? [] : (selectedStore ? orders.stores.filter((item) => item.store === selectedStore) : orders.stores));
+    : (outsidePeriod ? [] : (selectedStore.length ? orders.stores.filter((item) => selectedStore.includes(item.store)) : orders.stores));
   const totals = rows.reduce((a, r) => ({ total: a.total + r.total, retirada: a.retirada + r.retirada, entrega: a.entrega + r.entrega, revendedor: a.revendedor + r.revendedor, omni: a.omni + r.omni, retiradaCancelados: a.retiradaCancelados + r.retiradaCancelados, entregaCancelados: a.entregaCancelados + r.entregaCancelados, itens: a.itens + r.itens }), { total: 0, retirada: 0, entrega: 0, revendedor: 0, omni: 0, retiradaCancelados: 0, entregaCancelados: 0, itens: 0 });
   const resellerBreakdown = resellerCategories.map(([key, label]) => ({
     key, label, value: rows.reduce((sum, row) => sum + (row.revendedorCategorias?.[key] || 0), 0),
@@ -575,7 +579,7 @@ function OrdersView({ data, selectedStore, cycle, startDate, endDate, onImported
   }).sort((a, b) => b.total - a.total || a.label.localeCompare(b.label, "pt-BR"));
   const fiscalTotal = fiscalBreakdown.reduce((sum, item) => sum + item.total, 0);
   const days = Math.max(1, orders.daily?.length && (filterStart || filterEnd) ? new Set(selectedDaily.map((item) => item.date)).size : orders.period.days);
-  const scope = selectedStore || "Todas as lojas";
+  const scope = selectedStore.length ? selectedStore.join(", ") : "Todas as lojas";
   const orderTotal = totals.retirada + totals.entrega;
   // Os dados legados podem conter meios pedidos nas séries diárias. Para a
   // apresentação, arredondamos uma parte e calculamos a outra pelo total,
@@ -594,7 +598,7 @@ function OrdersView({ data, selectedStore, cycle, startDate, endDate, onImported
   </>;
 }
 
-function OrderRecurrenceView({ data, records, loading, error, selectedStore, cycle, startDate, endDate }: { data: DashboardData; records: OrderRecord[]; loading: boolean; error: string; selectedStore: string; cycle: string; startDate: string; endDate: string }) {
+function OrderRecurrenceView({ data, records, loading, error, selectedStore, cycle, startDate, endDate }: { data: DashboardData; records: OrderRecord[]; loading: boolean; error: string; selectedStore: string[]; cycle: string; startDate: string; endDate: string }) {
   const [city, setCity] = useState("");
   const [name, setName] = useState("");
   const [countOrder, setCountOrder] = useState<"desc" | "asc">("desc");
@@ -607,7 +611,7 @@ function OrderRecurrenceView({ data, records, loading, error, selectedStore, cyc
   const effectiveStart = [startDate, cyclePeriod?.start].filter(Boolean).sort().at(-1) || "";
   const effectiveEnd = [endDate, cyclePeriod?.end].filter(Boolean).sort().at(0) || "";
   const inRange = (date: string | null) => (!effectiveStart || Boolean(date) && date! >= effectiveStart) && (!effectiveEnd || Boolean(date) && date! <= effectiveEnd);
-  const filtered = useMemo(() => records.filter((item) => !item.canceled && (!selectedStore || item.store === selectedStore) && (!cycle || (item.cycle != null ? String(item.cycle) === cycle : inRange(item.date))) && inRange(item.date) && (!city || item.city === city) && (!name || normalizeText(item.reseller).includes(normalizeText(name)))), [records, selectedStore, cycle, effectiveStart, effectiveEnd, city, name]);
+  const filtered = useMemo(() => records.filter((item) => !item.canceled && matchesStores(selectedStore, item.store || "") && (!cycle || (item.cycle != null ? String(item.cycle) === cycle : inRange(item.date))) && inRange(item.date) && (!city || item.city === city) && (!name || normalizeText(item.reseller).includes(normalizeText(name)))), [records, selectedStore, cycle, effectiveStart, effectiveEnd, city, name]);
   const ranking = useMemo(() => {
     const groups = new Map<string, { reseller: string; channel: string; role: string; city: string; totalValue: number; count: number; orders: OrderRecord[] }>();
     for (const item of filtered) {
@@ -759,7 +763,7 @@ export default function Home() {
   const [refreshing, setRefreshing] = useState(false);
   const [view, setView] = useState("overview");
   const [menuOpen, setMenuOpen] = useState(false);
-  const [store, setStore] = useState("");
+  const [store, setStore] = useState<string[]>([]);
   const [cycle, setCycle] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -860,7 +864,7 @@ export default function Home() {
 
   const workingData = useMemo(() => {
     if (!data) return null;
-    const storeEntries = (store ? data.stores.filter((item) => item.store === store) : data.stores)
+    const storeEntries = (store.length ? data.stores.filter((item) => store.includes(item.store)) : data.stores)
       .map(({ store: name, storeCode }) => ({ store: name, storeCode }));
     const indicators = Object.fromEntries(Object.values(data.indicators).map((item) => {
       const recomputed = recomputeIndicator(item, store, cycle, startDate, endDate, storeEntries);
@@ -959,7 +963,7 @@ export default function Home() {
               <article><CircleGauge /><span>Indicadores dentro</span><strong>{good}</strong></article>
               <article><AlertTriangle /><span>Indicadores fora</span><strong>{bad}</strong></article>
             </section>
-            <section><div className="section-title"><div><h2>Indicadores principais</h2><p>Resultado do período e dos filtros selecionados.</p></div></div><div className="kpi-grid">{filteredIndicators.filter((item) => !statusFilter || item.current.status === statusFilter).map((item) => <KpiCard key={item.id} indicator={item} storeSelected={Boolean(store)} onOpen={() => openIndicator(item.id)} />)}</div></section>
+            <section><div className="section-title"><div><h2>Indicadores principais</h2><p>Resultado do período e dos filtros selecionados.</p></div></div><div className="kpi-grid">{filteredIndicators.filter((item) => !statusFilter || item.current.status === statusFilter).map((item) => <KpiCard key={item.id} indicator={item} storeSelected={store.length > 0} onOpen={() => openIndicator(item.id)} />)}</div></section>
             <section className="two-col">
               <article className="panel"><div className="section-title"><div><h2>{evolutionIndicator ? (isWithdrawal(evolutionIndicator.id) ? evolutionIndicator.label : trendTitle(evolutionIndicator)) : "Evolução do indicador"}</h2><p>{evolutionIndicator ? `Valores exibidos em ${trendUnit(evolutionIndicator.id)}.` : "Selecione um indicador"}</p></div></div>{evolutionIndicator && (isWithdrawal(evolutionIndicator.id) ? <Ranking indicator={evolutionIndicator} onStore={openStore} /> : <Trend indicator={evolutionIndicator} selectedCycle={cycle} />)}</article>
             </section>
@@ -967,8 +971,8 @@ export default function Home() {
           </>}
 
           {view === "indicator" && chosen && <>
-            <section className="page-head"><div><span className="eyebrow">Indicador</span><h1>{chosen.label}</h1><p>Meta, evolução, ranking e registros normalizados.</p></div>{(!isWithdrawal(chosen.id) || Boolean(store)) && <Badge status={chosen.current.status} informational={isInformational(chosen.id)} />}</section>
-             <section className="summary-grid three"><article><span>{isWithdrawal(chosen.id) ? "Situação" : "Resultado geral"}</span><strong>{isWithdrawal(chosen.id) ? store ? <><ResultValue result={chosen.current} id={chosen.id} /> pedidos em atraso</> : "\u00a0" : <ResultValue result={chosen.current} id={chosen.id} />}</strong></article><article><span>Meta</span><strong>{isInformational(chosen.id) ? "Apenas visualização" : formatTarget(chosen.id, chosen.current.target)}</strong></article><article><span>{isWithdrawal(chosen.id) ? "Apuração" : "Diferença"}</span><strong>{isWithdrawal(chosen.id) ? chosen.label : isInformational(chosen.id) ? "Não se aplica" : deltaText(chosen.current.value, chosen.current.target, chosen.direction, chosen.id)}</strong></article></section>
+            <section className="page-head"><div><span className="eyebrow">Indicador</span><h1>{chosen.label}</h1><p>Meta, evolução, ranking e registros normalizados.</p></div>{(!isWithdrawal(chosen.id) || store.length > 0) && <Badge status={chosen.current.status} informational={isInformational(chosen.id)} />}</section>
+             <section className="summary-grid three"><article><span>{isWithdrawal(chosen.id) ? "Situação" : "Resultado geral"}</span><strong>{isWithdrawal(chosen.id) ? store.length === 1 ? <><ResultValue result={chosen.current} id={chosen.id} /> pedidos em atraso</> : "\u00a0" : <ResultValue result={chosen.current} id={chosen.id} />}</strong></article><article><span>Meta</span><strong>{isInformational(chosen.id) ? "Apenas visualização" : formatTarget(chosen.id, chosen.current.target)}</strong></article><article><span>{isWithdrawal(chosen.id) ? "Apuração" : "Diferença"}</span><strong>{isWithdrawal(chosen.id) ? chosen.label : isInformational(chosen.id) ? "Não se aplica" : deltaText(chosen.current.value, chosen.current.target, chosen.direction, chosen.id)}</strong></article></section>
              {isWithdrawal(chosen.id)
                   ? <><section className="panel"><h2>{chosen.label}</h2><RankingSummary indicator={chosen} /><IndicatorDetailTable indicator={chosen} /></section><StoreComparisonChart indicator={chosen} /><section className="panel"><h2>{trendTitle(chosen)}</h2><Trend indicator={chosen} selectedCycle={cycle} /></section></>
                 : chosen.id === "medallia"
