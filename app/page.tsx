@@ -594,8 +594,7 @@ function OrdersView({ data, selectedStore, cycle, startDate, endDate, onImported
   </>;
 }
 
-function OrderRecurrenceView({ data, selectedStore, cycle, startDate, endDate }: { data: DashboardData; selectedStore: string; cycle: string; startDate: string; endDate: string }) {
-  const records = data.orders?.records || [];
+function OrderRecurrenceView({ data, records, loading, error, selectedStore, cycle, startDate, endDate }: { data: DashboardData; records: OrderRecord[]; loading: boolean; error: string; selectedStore: string; cycle: string; startDate: string; endDate: string }) {
   const [city, setCity] = useState("");
   const [name, setName] = useState("");
   const [countOrder, setCountOrder] = useState<"desc" | "asc">("desc");
@@ -618,7 +617,7 @@ function OrderRecurrenceView({ data, selectedStore, cycle, startDate, endDate }:
     <section className="page-head"><div><span className="eyebrow">Pedidos</span><h1>Recorrência de pedidos</h1><p>Ranking de revendedores no período selecionado. Cada importação semanal é somada ao histórico anterior.</p></div><span className="data-chip">{cycle ? `Ciclo ${cycle} · ` : ""}{selectedStore || "Todas as lojas"} · {period}</span></section>
     <section className="panel recurrence-filters"><div className="section-title"><div><h2>Filtros da recorrência</h2><p>Sem filtro de data, o ranking considera toda a planilha acumulada.</p></div><span className="table-hint">Cancelados não entram na contagem</span></div><div className="recurrence-filter-grid"><label>Revendedor<input value={name} onChange={(event) => setName(event.target.value)} placeholder="Buscar por nome" /></label><label>Cidade<select value={city} onChange={(event) => setCity(event.target.value)}><option value="">Todas as cidades</option>{cities.map((item) => <option key={item} value={item}>{item}</option>)}</select></label><label>Pedidos<select value={countOrder} onChange={(event) => setCountOrder(event.target.value as "desc" | "asc")}><option value="desc">Mais pedidos primeiro</option><option value="asc">Menos pedidos primeiro</option></select></label><label>Valor gasto<select value={valueOrder} onChange={(event) => setValueOrder(event.target.value as "none" | "desc" | "asc")}><option value="none">Sem ordenar por valor</option><option value="desc">Mais caro primeiro</option><option value="asc">Mais barato primeiro</option></select></label></div></section>
     <section className="summary-grid three recurrence-summary"><article><span>Pessoas no ranking</span><strong>{integer.format(ranking.length)}</strong><small>Após filtros</small></article><article><span>Pedidos no período</span><strong>{integer.format(filtered.length)}</strong><small>Importações acumuladas</small></article><article><span>Valor total</span><strong>{totalValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</strong><small>Pedidos não cancelados</small></article></section>
-    <section className="panel recurrence-panel"><div className="section-title"><div><h2>Ranking de recorrência</h2><p>Selecione uma pessoa para abrir os pedidos individualmente.</p></div><span className="table-hint">{integer.format(ranking.length)} resultados</span></div>{!records.length ? <div className="recurrence-empty"><Users size={24} /><strong>Importe a primeira planilha semanal</strong><p>Quando a planilha de pedidos for importada, os novos registros serão adicionados ao histórico e aparecerão neste ranking.</p></div> : !ranking.length ? <p className="muted">Nenhum pedido encontrado para os filtros selecionados.</p> : <div className="table-wrap recurrence-table-wrap"><table className="recurrence-table"><thead><tr><th>Revendedor</th><th>Canal de distribuição</th><th>Papel</th><th>Cidade</th><th>Total gasto</th><th>Pedidos</th><th aria-label="Detalhes" /></tr></thead><tbody>{ranking.map((person) => <><tr key={person.reseller} className={expanded === person.reseller ? "is-expanded" : ""} onClick={() => setExpanded(expanded === person.reseller ? null : person.reseller)}><th><strong>{person.reseller}</strong></th><td>{person.channel}</td><td>{person.role}</td><td>{person.city}</td><td className="emphasis-cell">{person.totalValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</td><td className="emphasis-cell">{integer.format(person.count)}</td><td><ChevronRight size={16} className={expanded === person.reseller ? "rotate-90" : ""} /></td></tr>{expanded === person.reseller && <tr className="recurrence-details-row"><td colSpan={7}><div className="recurrence-details"><strong>Pedidos de {person.reseller}</strong><table><thead><tr><th>Código do pedido</th><th>Data de captação</th><th>Valor</th></tr></thead><tbody>{person.orders.map((order) => <tr key={`${person.reseller}-${order.orderCode}-${order.date}`}><td>{order.orderCode}</td><td>{formatDay(order.date) || "—"}</td><td>{Number(order.value || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</td></tr>)}</tbody></table></div></td></tr>}</>)}</tbody></table></div>}</section>
+    <section className="panel recurrence-panel"><div className="section-title"><div><h2>Ranking de recorrência</h2><p>Selecione uma pessoa para abrir os pedidos individualmente.</p></div><span className="table-hint">{loading ? "Carregando pedidos…" : `${integer.format(ranking.length)} resultados`}</span></div>{loading ? <div className="recurrence-empty"><RefreshCw className="spin" size={24} /><strong>Carregando pedidos detalhados</strong><p>A planilha foi importada; preparando o ranking.</p></div> : error ? <div className="recurrence-empty"><Database size={24} /><strong>Não foi possível carregar os pedidos</strong><p>{error}</p></div> : !records.length ? <div className="recurrence-empty"><Users size={24} /><strong>Importe a primeira planilha semanal</strong><p>Quando a planilha de pedidos for importada, os novos registros serão adicionados ao histórico e aparecerão neste ranking.</p></div> : !ranking.length ? <p className="muted">Nenhum pedido encontrado para os filtros selecionados.</p> : <div className="table-wrap recurrence-table-wrap"><table className="recurrence-table"><thead><tr><th>Revendedor</th><th>Canal de distribuição</th><th>Papel</th><th>Cidade</th><th>Total gasto</th><th>Pedidos</th><th aria-label="Detalhes" /></tr></thead><tbody>{ranking.map((person) => <><tr key={person.reseller} className={expanded === person.reseller ? "is-expanded" : ""} onClick={() => setExpanded(expanded === person.reseller ? null : person.reseller)}><th><strong>{person.reseller}</strong></th><td>{person.channel}</td><td>{person.role}</td><td>{person.city}</td><td className="emphasis-cell">{person.totalValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</td><td className="emphasis-cell">{integer.format(person.count)}</td><td><ChevronRight size={16} className={expanded === person.reseller ? "rotate-90" : ""} /></td></tr>{expanded === person.reseller && <tr className="recurrence-details-row"><td colSpan={7}><div className="recurrence-details"><strong>Pedidos de {person.reseller}</strong><table><thead><tr><th>Código do pedido</th><th>Data de captação</th><th>Valor</th></tr></thead><tbody>{person.orders.map((order) => <tr key={`${person.reseller}-${order.orderCode}-${order.date}`}><td>{order.orderCode}</td><td>{formatDay(order.date) || "—"}</td><td>{Number(order.value || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</td></tr>)}</tbody></table></div></td></tr>}</>)}</tbody></table></div>}</section>
   </>;
 }
 const TEMP_PASSWORD = "Sfera@2026";
@@ -742,6 +741,9 @@ function CadastroView({
 
 export default function Home() {
   const [data, setData] = useState<DashboardData | null>(null);
+  const [recurrenceRecords, setRecurrenceRecords] = useState<OrderRecord[]>([]);
+  const [recurrenceLoading, setRecurrenceLoading] = useState(false);
+  const [recurrenceError, setRecurrenceError] = useState("");
   const [error, setError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [view, setView] = useState("overview");
@@ -817,6 +819,7 @@ export default function Home() {
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Não foi possível carregar os dados.");
       setData(body);
+      setRecurrenceRecords([]);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Falha ao carregar a API local.");
     } finally { setRefreshing(false); }
@@ -827,6 +830,22 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (view !== "recurrence" || !data || recurrenceRecords.length) return;
+    let cancelled = false;
+    setRecurrenceLoading(true);
+    setRecurrenceError("");
+    fetch(`${API}/api/orders/records`, { cache: "no-store" })
+      .then(async (response) => {
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || "Não foi possível carregar os pedidos detalhados.");
+        if (!cancelled) setRecurrenceRecords(Array.isArray(body.records) ? body.records : []);
+      })
+      .catch((caught) => { if (!cancelled) setRecurrenceError(caught instanceof Error ? caught.message : "Falha ao carregar os pedidos detalhados."); })
+      .finally(() => { if (!cancelled) setRecurrenceLoading(false); });
+    return () => { cancelled = true; };
+  }, [view, data, recurrenceRecords.length]);
 
   const workingData = useMemo(() => {
     if (!data) return null;
@@ -965,6 +984,9 @@ export default function Home() {
           {view === "recurrence" && (
             <OrderRecurrenceView
               data={data}
+              records={recurrenceRecords}
+              loading={recurrenceLoading}
+              error={recurrenceError}
               selectedStore={store}
               cycle={cycle}
               startDate={startDate}

@@ -127,7 +127,8 @@ app.get("/api/health", (_request, response) => {
 app.get("/api/dashboard", async (_request, response) => {
   try {
     if (!cache) await refresh("startup");
-    response.json(cache);
+    const orders = cache.orders ? (({ records, ...summary }) => summary)(cache.orders) : cache.orders;
+    response.json({ ...cache, orders });
   } catch (error) {
     response.status(503).json({ error: error.message, lastError });
   }
@@ -135,7 +136,9 @@ app.get("/api/dashboard", async (_request, response) => {
 
 app.post("/api/refresh", async (_request, response) => {
   try {
-    response.json(await refresh("manual"));
+    const snapshot = await refresh("manual");
+    const orders = snapshot.orders ? (({ records, ...summary }) => summary)(snapshot.orders) : snapshot.orders;
+    response.json({ ...snapshot, orders });
   } catch (error) {
     response.status(500).json({ error: error.message, lastError });
   }
@@ -173,6 +176,15 @@ app.get("/api/stores/:store", async (request, response) => {
 app.listen(PORT, "127.0.0.1", () => {
   console.log(`API de Operações: http://127.0.0.1:${PORT}`);
   console.log(`Fonte: ${workbookPath}`);
+});
+
+app.get("/api/orders/records", async (_request, response) => {
+  try {
+    if (!cache) await refresh("startup");
+    response.json({ records: cache.orders?.records || [], source: cache.orders?.source || null, period: cache.orders?.period || null });
+  } catch (error) {
+    response.status(500).json({ error: error.message });
+  }
 });
 
 refresh("startup").catch((error) => {
