@@ -11,7 +11,7 @@ import {
 } from "recharts";
 import cyclePeriodsSource from "../config/cycles.json";
 
-const API = process.env.NEXT_PUBLIC_OPERATIONS_API_URL || "http://127.0.0.1:8788";
+const API = process.env.NEXT_PUBLIC_OPERATIONS_API_URL || (typeof window !== "undefined" && ["localhost", "127.0.0.1"].includes(window.location.hostname) ? "http://127.0.0.1:8788" : "");
 const STATUS = {
   good: { icon: "✓", label: "Dentro da meta", className: "good" },
   warning: { icon: "▲", label: "Atenção", className: "warning" },
