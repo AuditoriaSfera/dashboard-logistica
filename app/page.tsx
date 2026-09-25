@@ -810,43 +810,36 @@ export default function Home() {
   }, [view]);
 
   useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem("operacoes-access-users");
-      if (saved) {
-        const resetKey = "sfera-password-reset-2026-09-v3";
-        const shouldReset = !window.localStorage.getItem(resetKey);
-        let normalized = (JSON.parse(saved) as Array<Partial<AccessUser> & { store?: string }>).map((user) => ({
-          id: user.id || `${Date.now()}-${Math.random()}`,
-          name: user.name || "Usuário",
-          email: user.email || "",
-          accountType: user.accountType || "unit",
-          stores: user.stores || (user.store ? [user.store] : []),
-          password: shouldReset ? TEMP_PASSWORD : (user.password || TEMP_PASSWORD),
-          mustChangePassword: shouldReset ? true : Boolean(user.mustChangePassword),
-          status: user.status || "approved",
-          active: user.active !== false,
-        }));
-        // Garante que o administrador inicial também seja criado em uma nova origem online
-        // que já possua usuários salvos, mas não tenha o cadastro administrativo.
-        if (!normalized.some((user) => user.email.toLowerCase() === "admin@sfera.local")) {
-          normalized = [{ id: "admin-inicial", name: "Administrador Sfera", email: "admin@sfera.local", accountType: "admin", stores: [], password: TEMP_PASSWORD, mustChangePassword: true, status: "approved", active: true }, ...normalized];
-        } else {
-          normalized = normalized.map((user) => user.email.toLowerCase() === "admin@sfera.local" && !user.password ? { ...user, password: TEMP_PASSWORD, mustChangePassword: true } : user);
+    let cancelled = false;
+    const loadAccess = async () => {
+      try {
+        const response = await fetch("/api/auth", { cache: "no-store" });
+        if (!response.ok) throw new Error("auth api unavailable");
+        const body = await response.json() as { users?: AccessUser[]; resetRequests?: PasswordResetRequest[] };
+        if (!cancelled) {
+          setAccessUsers(Array.isArray(body.users) ? body.users : []);
+          setResetRequests(Array.isArray(body.resetRequests) ? body.resetRequests : []);
         }
-        setAccessUsers(normalized);
-        if (shouldReset) {
-          window.localStorage.setItem("operacoes-access-users", JSON.stringify(normalized));
-          window.localStorage.setItem(resetKey, "1");
-        }
+      } catch {
+        // Compatibilidade com versões locais antigas: o servidor continua sendo a fonte
+        // principal, mas o navegador local ainda permite abrir uma instalação offline.
+        try {
+          const saved = window.localStorage.getItem("operacoes-access-users");
+          if (saved && !cancelled) setAccessUsers(JSON.parse(saved) as AccessUser[]);
+          const savedRequests = window.localStorage.getItem("operacoes-password-reset-requests");
+          if (savedRequests && !cancelled) setResetRequests(JSON.parse(savedRequests) as PasswordResetRequest[]);
+        } catch { /* storage indisponível */ }
+      } finally {
+        try { const session = window.localStorage.getItem("operacoes-session-user"); if (session && !cancelled) setSessionUserId(session); } catch { /* storage indisponível */ }
+        if (!cancelled) setAuthReady(true);
       }
-      const session = window.localStorage.getItem("operacoes-session-user");
-      if (session) setSessionUserId(session);
-      const savedRequests = window.localStorage.getItem("operacoes-password-reset-requests");
-      if (savedRequests) setResetRequests(JSON.parse(savedRequests) as PasswordResetRequest[]);
-    } catch { /* storage indisponível */ } finally { setAuthReady(true); }
+    };
+    loadAccess();
+    return () => { cancelled = true; };
   }, []);
-  const saveAccessUsers = (users: AccessUser[]) => { setAccessUsers(users); try { window.localStorage.setItem("operacoes-access-users", JSON.stringify(users)); } catch { /* storage indisponível */ } };
-  const saveResetRequests = (requests: PasswordResetRequest[]) => { setResetRequests(requests); try { window.localStorage.setItem("operacoes-password-reset-requests", JSON.stringify(requests)); } catch { /* storage indisponível */ } };
+  const saveAuthPatch = (payload: Record<string, unknown>) => { void fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).catch(() => undefined); };
+  const saveAccessUsers = (users: AccessUser[]) => { setAccessUsers(users); saveAuthPatch({ users }); try { window.localStorage.setItem("operacoes-access-users", JSON.stringify(users)); } catch { /* storage indisponível */ } };
+  const saveResetRequests = (requests: PasswordResetRequest[]) => { setResetRequests(requests); saveAuthPatch({ resetRequests: requests }); try { window.localStorage.setItem("operacoes-password-reset-requests", JSON.stringify(requests)); } catch { /* storage indisponível */ } };
   useEffect(() => { if (authReady && !accessUsers.length) { const admin: AccessUser = { id: "admin-inicial", name: "Administrador Sfera", email: "admin@sfera.local", accountType: "admin", stores: [], password: TEMP_PASSWORD, mustChangePassword: true, status: "approved", active: true }; saveAccessUsers([admin]); } }, [authReady, accessUsers.length]);
 
   const load = useCallback(async (manual = false) => {
