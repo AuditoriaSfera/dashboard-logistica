@@ -815,7 +815,7 @@ export default function Home() {
       if (saved) {
         const resetKey = "sfera-password-reset-2026-09-v3";
         const shouldReset = !window.localStorage.getItem(resetKey);
-        const normalized = (JSON.parse(saved) as Array<Partial<AccessUser> & { store?: string }>).map((user) => ({
+        let normalized = (JSON.parse(saved) as Array<Partial<AccessUser> & { store?: string }>).map((user) => ({
           id: user.id || `${Date.now()}-${Math.random()}`,
           name: user.name || "Usuário",
           email: user.email || "",
@@ -826,6 +826,13 @@ export default function Home() {
           status: user.status || "approved",
           active: user.active !== false,
         }));
+        // Garante que o administrador inicial também seja criado em uma nova origem online
+        // que já possua usuários salvos, mas não tenha o cadastro administrativo.
+        if (!normalized.some((user) => user.email.toLowerCase() === "admin@sfera.local")) {
+          normalized = [{ id: "admin-inicial", name: "Administrador Sfera", email: "admin@sfera.local", accountType: "admin", stores: [], password: TEMP_PASSWORD, mustChangePassword: true, status: "approved", active: true }, ...normalized];
+        } else {
+          normalized = normalized.map((user) => user.email.toLowerCase() === "admin@sfera.local" && !user.password ? { ...user, password: TEMP_PASSWORD, mustChangePassword: true } : user);
+        }
         setAccessUsers(normalized);
         if (shouldReset) {
           window.localStorage.setItem("operacoes-access-users", JSON.stringify(normalized));
