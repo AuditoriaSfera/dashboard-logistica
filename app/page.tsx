@@ -955,7 +955,7 @@ export default function Home() {
     <div className="app-shell">
       <aside className={`sidebar ${menuOpen ? "open" : ""}`}>
         <div className="brand"><img className="sidebar-logo" src="/dashboard-mark-transparent.png" alt="Sfera Operações" /><div><small>Performance de lojas</small></div><button className="close-menu" onClick={() => setMenuOpen(false)}><X /></button></div>
-        <nav>{nav.map(([id, label, Icon]) => <button key={id} className={view === id ? "active" : ""} onClick={() => { setView(id); setMenuOpen(false); }}><Icon size={18} />{label}</button>)}</nav>
+        <nav>{nav.filter(([id]) => id !== "cadastro" || currentUser.accountType === "admin").map(([id, label, Icon]) => <button key={id} className={view === id ? "active" : ""} onClick={() => { setView(id); setMenuOpen(false); }}><Icon size={18} />{label}</button>)}</nav>
         <div className="nav-group"><span>Indicadores</span>{data.filters.indicators.map((item) => <button key={item.id} className={view === "indicator" && activeIndicator === item.id ? "active" : ""} onClick={() => openIndicator(item.id)}><BarChart3 size={16} />{item.label}</button>)}</div>
         <div className="source-mini"><Database size={16} /><div><strong>Fonte conectada</strong><small>{data.source.fileName}</small></div></div>
       </aside>
@@ -1026,7 +1026,7 @@ export default function Home() {
 
           {view === "quality" && <><section className="page-head"><div><span className="eyebrow">Governança</span><h1>Qualidade dos Dados</h1><p>Problemas registrados sem interromper o restante do dashboard.</p></div></section><section className="summary-grid three"><article><span>Críticos</span><strong>{data.quality.summary.critical || 0}</strong></article><article><span>Altos</span><strong>{data.quality.summary.high || 0}</strong></article><article><span>Médios</span><strong>{data.quality.summary.medium || 0}</strong></article></section><section className="panel issue-list">{data.quality.issues.slice(0, 100).map((item, index) => <div key={index}><span className={`severity ${item.severity}`}>{item.severity}</span><strong>{item.message}</strong><small>{item.indicator ? data.indicators[item.indicator]?.label : item.code}</small></div>)}</section></>}
 
-          {view === "cadastro" && <CadastroView stores={data.stores.map(({ store, storeCode }) => ({ store, storeCode }))} users={accessUsers} onUsersChange={saveAccessUsers} resetRequests={resetRequests} onResetRequestsChange={saveResetRequests} onViewStore={(name) => { setStore(name); setActiveStore(name); setView("store"); }} />}
+          {view === "cadastro" && currentUser.accountType === "admin" && <CadastroView stores={data.stores.map(({ store, storeCode }) => ({ store, storeCode }))} users={accessUsers} onUsersChange={saveAccessUsers} resetRequests={resetRequests} onResetRequestsChange={saveResetRequests} onViewStore={(name) => { setStore(name); setActiveStore(name); setView("store"); }} />}
 
           {view === "profile" && <ProfileView user={currentUser} stores={data.stores.map(({ store, storeCode }) => ({ store, storeCode }))} />}
 
