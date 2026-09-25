@@ -57,6 +57,16 @@ button:focus-visible, select:focus-visible { outline: 3px solid #9eb0f0; outline
 .filter-bar select { padding-right: 30px; }
 .filter-bar select[multiple] { height: 74px; padding: 4px 8px; }
 .filter-help { color: var(--muted); font-size: 10px; font-weight: 500; text-transform: none; letter-spacing: 0; }
+.multi-select { position: relative; }
+.multi-select-trigger { width: 100%; height: 36px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid #dfe3ea; border-radius: 8px; background: #fff; padding: 0 10px; color: var(--muted); font-size: 12px; cursor: pointer; text-align: left; }
+.multi-select-trigger.has-value { color: var(--ink); font-weight: 700; }
+.multi-select-menu { position: absolute; z-index: 40; top: calc(100% + 6px); left: 0; width: min(300px, 80vw); padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: #fff; box-shadow: 0 14px 32px rgb(25 36 60 / 18%); }
+.multi-select-options { display: grid; gap: 2px; max-height: 260px; overflow-y: auto; }
+.multi-select-options label { display: flex; grid-template-columns: auto 1fr; align-items: center; gap: 8px; min-width: 0; padding: 7px 5px; color: var(--ink); font-size: 12px; font-weight: 600; text-transform: none; letter-spacing: 0; cursor: pointer; }
+.multi-select-options input { width: 15px; min-width: 15px; height: 15px; margin: 0; accent-color: var(--blue); }
+.multi-select-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--line); }
+.multi-select-actions button { height: 30px; border: 0; border-radius: 7px; padding: 0 10px; background: transparent; color: var(--blue); font-size: 11px; font-weight: 700; cursor: pointer; }
+.multi-select-actions .primary-button { background: var(--blue); color: #fff; }
 .clear { border: 0; background: transparent; color: var(--blue); font-size: 12px; font-weight: 700; padding: 10px; white-space: nowrap; cursor: pointer; }
 .content { position: relative; width: min(1480px, 100%); margin: 0 auto; padding: 28px; display: grid; gap: 24px; }
 .content-logo { display: none; }
@@ -353,6 +363,7 @@ button:focus-visible, select:focus-visible { outline: 3px solid #9eb0f0; outline
 .recurrence-filter-grid { display: grid; grid-template-columns: 1.3fr repeat(3, minmax(170px, 1fr)); gap: 12px; }
 .recurrence-filter-grid label { display: grid; gap: 6px; color: var(--muted); font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
 .recurrence-filter-grid input, .recurrence-filter-grid select { width: 100%; height: 38px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); padding: 0 10px; font: inherit; font-size: 12px; text-transform: none; letter-spacing: 0; }
+.recurrence-filter-grid .multi-select-trigger { height: 38px; }
 .recurrence-summary article { min-height: 100px; }
 .recurrence-summary article small { color: var(--muted); font-size: 11px; }
 .recurrence-panel { overflow: hidden; }
