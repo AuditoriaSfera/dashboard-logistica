@@ -52,6 +52,8 @@ type OrderRecord = {
   channel: string;
   role: string;
   city: string;
+  store?: string;
+  cycle?: number | null;
   value: number;
   date: string | null;
   canceled?: boolean;
@@ -592,7 +594,7 @@ function OrdersView({ data, selectedStore, cycle, startDate, endDate, onImported
   </>;
 }
 
-function OrderRecurrenceView({ data, startDate, endDate }: { data: DashboardData; startDate: string; endDate: string }) {
+function OrderRecurrenceView({ data, selectedStore, cycle, startDate, endDate }: { data: DashboardData; selectedStore: string; cycle: string; startDate: string; endDate: string }) {
   const records = data.orders?.records || [];
   const [city, setCity] = useState("");
   const [name, setName] = useState("");
@@ -600,17 +602,20 @@ function OrderRecurrenceView({ data, startDate, endDate }: { data: DashboardData
   const [valueOrder, setValueOrder] = useState<"none" | "desc" | "asc">("none");
   const [expanded, setExpanded] = useState<string | null>(null);
   const cities = [...new Set(records.map((item) => item.city).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR"));
-  const inRange = (date: string | null) => (!startDate || Boolean(date) && date! >= startDate) && (!endDate || Boolean(date) && date! <= endDate);
-  const filtered = records.filter((item) => !item.canceled && inRange(item.date) && (!city || item.city === city) && (!name || normalizeText(item.reseller).includes(normalizeText(name))));
+  const cyclePeriod = cycle ? CYCLE_PERIODS[cycle] : null;
+  const effectiveStart = [startDate, cyclePeriod?.start].filter(Boolean).sort().at(-1) || "";
+  const effectiveEnd = [endDate, cyclePeriod?.end].filter(Boolean).sort().at(0) || "";
+  const inRange = (date: string | null) => (!effectiveStart || Boolean(date) && date! >= effectiveStart) && (!effectiveEnd || Boolean(date) && date! <= effectiveEnd);
+  const filtered = records.filter((item) => !item.canceled && (!selectedStore || item.store === selectedStore) && (!cycle || (item.cycle != null ? String(item.cycle) === cycle : inRange(item.date))) && inRange(item.date) && (!city || item.city === city) && (!name || normalizeText(item.reseller).includes(normalizeText(name))));
   const ranking = [...new Map(filtered.map((item) => [item.reseller, item])).values()].map((item) => {
     const personOrders = filtered.filter((row) => row.reseller === item.reseller);
     return { reseller: item.reseller, channel: item.channel || "—", role: item.role || "—", city: item.city || "—", totalValue: personOrders.reduce((sum, row) => sum + Number(row.value || 0), 0), count: personOrders.length, orders: personOrders };
   }).sort((a, b) => countOrder === "desc" ? b.count - a.count || b.totalValue - a.totalValue : a.count - b.count || a.totalValue - b.totalValue);
   if (valueOrder !== "none") ranking.sort((a, b) => valueOrder === "desc" ? b.totalValue - a.totalValue || b.count - a.count : a.totalValue - b.totalValue || a.count - b.count);
   const totalValue = filtered.reduce((sum, item) => sum + Number(item.value || 0), 0);
-  const period = startDate || endDate ? `${formatDay(startDate) || "início"} a ${formatDay(endDate) || "fim"}` : "Toda a planilha acumulada";
+  const period = effectiveStart || effectiveEnd ? `${formatDay(effectiveStart) || "início"} a ${formatDay(effectiveEnd) || "fim"}` : "Toda a planilha acumulada";
   return <>
-    <section className="page-head"><div><span className="eyebrow">Pedidos</span><h1>Recorrência de pedidos</h1><p>Ranking de revendedores no período selecionado. Cada importação semanal é somada ao histórico anterior.</p></div><span className="data-chip">Período: {period}</span></section>
+    <section className="page-head"><div><span className="eyebrow">Pedidos</span><h1>Recorrência de pedidos</h1><p>Ranking de revendedores no período selecionado. Cada importação semanal é somada ao histórico anterior.</p></div><span className="data-chip">{cycle ? `Ciclo ${cycle} · ` : ""}{selectedStore || "Todas as lojas"} · {period}</span></section>
     <section className="panel recurrence-filters"><div className="section-title"><div><h2>Filtros da recorrência</h2><p>Sem filtro de data, o ranking considera toda a planilha acumulada.</p></div><span className="table-hint">Cancelados não entram na contagem</span></div><div className="recurrence-filter-grid"><label>Revendedor<input value={name} onChange={(event) => setName(event.target.value)} placeholder="Buscar por nome" /></label><label>Cidade<select value={city} onChange={(event) => setCity(event.target.value)}><option value="">Todas as cidades</option>{cities.map((item) => <option key={item} value={item}>{item}</option>)}</select></label><label>Pedidos<select value={countOrder} onChange={(event) => setCountOrder(event.target.value as "desc" | "asc")}><option value="desc">Mais pedidos primeiro</option><option value="asc">Menos pedidos primeiro</option></select></label><label>Valor gasto<select value={valueOrder} onChange={(event) => setValueOrder(event.target.value as "none" | "desc" | "asc")}><option value="none">Sem ordenar por valor</option><option value="desc">Mais caro primeiro</option><option value="asc">Mais barato primeiro</option></select></label></div></section>
     <section className="summary-grid three recurrence-summary"><article><span>Pessoas no ranking</span><strong>{integer.format(ranking.length)}</strong><small>Após filtros</small></article><article><span>Pedidos no período</span><strong>{integer.format(filtered.length)}</strong><small>Importações acumuladas</small></article><article><span>Valor total</span><strong>{totalValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</strong><small>Pedidos não cancelados</small></article></section>
     <section className="panel recurrence-panel"><div className="section-title"><div><h2>Ranking de recorrência</h2><p>Selecione uma pessoa para abrir os pedidos individualmente.</p></div><span className="table-hint">{integer.format(ranking.length)} resultados</span></div>{!records.length ? <div className="recurrence-empty"><Users size={24} /><strong>Importe a primeira planilha semanal</strong><p>Quando a planilha de pedidos for importada, os novos registros serão adicionados ao histórico e aparecerão neste ranking.</p></div> : !ranking.length ? <p className="muted">Nenhum pedido encontrado para os filtros selecionados.</p> : <div className="table-wrap recurrence-table-wrap"><table className="recurrence-table"><thead><tr><th>Revendedor</th><th>Canal de distribuição</th><th>Papel</th><th>Cidade</th><th>Total gasto</th><th>Pedidos</th><th aria-label="Detalhes" /></tr></thead><tbody>{ranking.map((person) => <><tr key={person.reseller} className={expanded === person.reseller ? "is-expanded" : ""} onClick={() => setExpanded(expanded === person.reseller ? null : person.reseller)}><th><strong>{person.reseller}</strong></th><td>{person.channel}</td><td>{person.role}</td><td>{person.city}</td><td className="emphasis-cell">{person.totalValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</td><td className="emphasis-cell">{integer.format(person.count)}</td><td><ChevronRight size={16} className={expanded === person.reseller ? "rotate-90" : ""} /></td></tr>{expanded === person.reseller && <tr className="recurrence-details-row"><td colSpan={7}><div className="recurrence-details"><strong>Pedidos de {person.reseller}</strong><table><thead><tr><th>Código do pedido</th><th>Data de captação</th><th>Valor</th></tr></thead><tbody>{person.orders.map((order) => <tr key={`${person.reseller}-${order.orderCode}-${order.date}`}><td>{order.orderCode}</td><td>{formatDay(order.date) || "—"}</td><td>{Number(order.value || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</td></tr>)}</tbody></table></div></td></tr>}</>)}</tbody></table></div>}</section>
@@ -957,7 +962,15 @@ export default function Home() {
 
           {view === "performance" && <OrdersView data={data} selectedStore={store} cycle={cycle} startDate={startDate} endDate={endDate} onImported={() => load(true)} />}
 
-          {view === "recurrence" && <OrderRecurrenceView data={data} startDate={startDate} endDate={endDate} />}
+          {view === "recurrence" && (
+            <OrderRecurrenceView
+              data={data}
+              selectedStore={store}
+              cycle={cycle}
+              startDate={startDate}
+              endDate={endDate}
+            />
+          )}
 
           {view === "quality" && <><section className="page-head"><div><span className="eyebrow">Governança</span><h1>Qualidade dos Dados</h1><p>Problemas registrados sem interromper o restante do dashboard.</p></div></section><section className="summary-grid three"><article><span>Críticos</span><strong>{data.quality.summary.critical || 0}</strong></article><article><span>Altos</span><strong>{data.quality.summary.high || 0}</strong></article><article><span>Médios</span><strong>{data.quality.summary.medium || 0}</strong></article></section><section className="panel issue-list">{data.quality.issues.slice(0, 100).map((item, index) => <div key={index}><span className={`severity ${item.severity}`}>{item.severity}</span><strong>{item.message}</strong><small>{item.indicator ? data.indicators[item.indicator]?.label : item.code}</small></div>)}</section></>}
 
