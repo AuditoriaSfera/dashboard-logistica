@@ -122,4 +122,7 @@ def parse(path):
         daily_result.append(b)
     st=Path(path).stat(); return {'source':{'path':str(Path(path).resolve()),'fileName':Path(path).name,'modifiedAt':datetime.fromtimestamp(st.st_mtime).isoformat(),'size':st.st_size},'period':{'start':min(dates) if dates else None,'end':max(dates) if dates else None,'days':len(dates)},'stores':result,'daily':daily_result,'records':records}
 
-if __name__ == '__main__': print(json.dumps(parse(sys.argv[1]), ensure_ascii=False, separators=(',',':')))
+if __name__ == '__main__':
+    # Escapa caracteres não ASCII para que o JSON atravesse o stdout do Windows
+    # sem ser recodificado como CP-1252 e virar o símbolo � no navegador.
+    print(json.dumps(parse(sys.argv[1]), ensure_ascii=True, separators=(',', ':')))
