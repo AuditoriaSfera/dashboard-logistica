@@ -52,7 +52,7 @@ def parse(path):
     c_fiscal = col('SituaçãoFiscal','Situacao Fiscal'); c_role = col('Papel'); c_meio = col('MeioCaptacao')
     c_items = col('QtdeItens'); c_date = col('Data Captação')
     c_order = col('CodigoPedido', 'Código Pedido'); c_name = col('NomePessoa', 'Pessoa')
-    c_city = col('Cidade'); c_value = col('ValorPedido', 'ValorTotalSemCCR', 'ValorLiquido')
+    c_city = col('Cidade'); c_value = col('ValorPraticado', 'ValorPedido', 'ValorTotalSemCCR', 'ValorLiquido')
     required = [c_source,c_type,c_cancel,c_role,c_items,c_date]
     if any(v is None for v in required): raise RuntimeError('A aba Pag não possui todas as colunas necessárias.')
     buckets = {}; daily = {}; dates = set(); records = []
