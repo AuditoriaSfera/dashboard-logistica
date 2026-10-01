@@ -2,6 +2,7 @@ import fs from "node:fs";
 import chokidar from "chokidar";
 import cors from "cors";
 import express from "express";
+import { GET as authGet, POST as authPost } from "./auth.mjs";
 import { findDefaultWorkbook, parseWorkbook } from "./parser.mjs";
 
 const PORT = Number(process.env.OPERATIONS_API_PORT || 8788);
@@ -92,6 +93,25 @@ function loadPersistedOrders(cumulativeFile, currentOrders) {
   }
 }
 app.use(express.json());
+app.all("/api/auth", async (request, response) => {
+  try {
+    const headers = new Headers();
+    for (const [key, value] of Object.entries(request.headers)) {
+      if (value !== undefined) headers.set(key, Array.isArray(value) ? value.join(", ") : value);
+    }
+    const webRequest = new Request(new URL(request.originalUrl, `http://${request.headers.host || "localhost"}`), {
+      method: request.method,
+      headers,
+      ...(request.method === "POST" ? { body: JSON.stringify(request.body ?? {}) } : {}),
+    });
+    const result = request.method === "GET" ? await authGet(webRequest) : request.method === "POST" ? await authPost(webRequest) : new Response(null, { status: 405 });
+    result.headers.forEach((value, key) => response.setHeader(key, value));
+    response.status(result.status).send(Buffer.from(await result.arrayBuffer()));
+  } catch (error) {
+    console.error("Falha no endpoint de acesso:", error?.code || "UNKNOWN");
+    response.status(503).json({ error: "Não foi possível acessar o serviço de usuários. Tente novamente." });
+  }
+});
 
 async function refresh(reason = "manual", options = {}) {
   if (loading) return loading;

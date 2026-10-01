@@ -4,6 +4,15 @@ set "NODE_BIN=C:\Users\carlos.saraiva\.cache\codex-runtimes\codex-primary-runtim
 set "PATH=%NODE_BIN%;%PATH%"
 cd /d "%~dp0"
 
+if not defined LOCALAPPDATA (
+  echo LOCALAPPDATA nao definido; nao e possivel preparar o armazenamento seguro de usuarios.
+  pause
+  exit /b 1
+)
+set "ACCESS_DATA_DIR=%LOCALAPPDATA%\DashboardLogistica\Auth"
+set "ACCESS_APP_ORIGIN=http://localhost:3000"
+if not exist "%ACCESS_DATA_DIR%" mkdir "%ACCESS_DATA_DIR%"
+
 if not exist "%NODE_BIN%\node.exe" (
   echo Node.js do Codex nao foi encontrado em:
   echo %NODE_BIN%

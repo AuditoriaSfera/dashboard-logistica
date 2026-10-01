@@ -10,6 +10,8 @@ import {
   ResponsiveContainer, Tooltip, XAxis, YAxis, ReferenceLine, LabelList,
 } from "recharts";
 import cyclePeriodsSource from "../config/cycles.json";
+import { AccessUser, authRequest } from "./auth-client";
+import { AuthScreen, PasswordChangeScreen, CadastroView } from "./access-components";
 
 const API = process.env.NEXT_PUBLIC_OPERATIONS_API_URL || (typeof window !== "undefined" && ["localhost", "127.0.0.1"].includes(window.location.hostname) ? "http://127.0.0.1:8788" : "");
 const STATUS = {
@@ -645,58 +647,6 @@ function OrderRecurrenceView({ data, records, loading, error, selectedStore, cyc
     <section className="panel recurrence-panel"><div className="section-title"><div><h2>Ranking de recorrência</h2><p>Selecione uma pessoa para abrir os pedidos individualmente.</p></div><span className="table-hint">{loading ? "Carregando pedidos…" : `${integer.format(ranking.length)} resultados`}</span></div>{loading ? <div className="recurrence-empty"><RefreshCw className="spin" size={24} /><strong>Carregando pedidos detalhados</strong><p>A planilha foi importada; preparando o ranking.</p></div> : error ? <div className="recurrence-empty"><Database size={24} /><strong>Não foi possível carregar os pedidos</strong><p>{error}</p></div> : !records.length ? <div className="recurrence-empty"><Users size={24} /><strong>Importe a primeira planilha semanal</strong><p>Quando a planilha de pedidos for importada, os novos registros serão adicionados ao histórico e aparecerão neste ranking.</p></div> : !ranking.length ? <p className="muted">Nenhum pedido encontrado para os filtros selecionados.</p> : <><div className="table-wrap recurrence-table-wrap"><table className="recurrence-table"><thead><tr><th>Revendedor</th><th>Canal de distribuição</th><th>Papel</th><th>Cidade</th><th>Total gasto</th><th>Pedidos</th><th aria-label="Detalhes" /></tr></thead><tbody>{visibleRanking.map((person) => <><tr key={person.reseller} className={expanded === person.reseller ? "is-expanded" : ""} onClick={() => setExpanded(expanded === person.reseller ? null : person.reseller)}><th><strong>{person.reseller}</strong></th><td>{person.channel}</td><td>{person.role}</td><td>{person.city}</td><td className="emphasis-cell">{person.totalValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</td><td className="emphasis-cell">{integer.format(person.count)}</td><td><ChevronRight size={16} className={expanded === person.reseller ? "rotate-90" : ""} /></td></tr>{expanded === person.reseller && <tr className="recurrence-details-row"><td colSpan={7}><div className="recurrence-details"><strong>Pedidos de {person.reseller}</strong><table><thead><tr><th>Código do pedido</th><th>Data de captação</th><th>Valor</th></tr></thead><tbody>{person.orders.map((order) => <tr key={`${person.reseller}-${order.orderCode}-${order.date}`}><td>{order.orderCode}</td><td>{formatDay(order.date) || "—"}</td><td>{Number(order.value || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</td></tr>)}</tbody></table></div></td></tr>}</>)}</tbody></table></div><div className="recurrence-pagination"><button type="button" disabled={page === 0} onClick={() => setPage((current) => Math.max(0, current - 1))}>Anterior</button><span>Página {page + 1} de {pageCount}</span><button type="button" disabled={page >= pageCount - 1} onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}>Próxima</button></div></>}</section>
   </>;
 }
-const TEMP_PASSWORD = "Sfera@2026";
-type AccessUser = { id: string; name: string; email: string; phone?: string; company?: string; accountType: "admin" | "unit"; stores: string[]; password?: string; mustChangePassword?: boolean; resetNotice?: string; status: "pending" | "approved" | "rejected" | "inactive"; requestedAt?: string; active: boolean };
-type PasswordResetRequest = { id: string; userId: string; name: string; email: string; requestedAt: string; status: "pending" | "approved" | "rejected" };
-
-function AuthScreen({ users, onUsersChange, resetRequests, onResetRequestsChange, onLogin }: { users: AccessUser[]; onUsersChange: (users: AccessUser[]) => void; resetRequests: PasswordResetRequest[]; onResetRequestsChange: (requests: PasswordResetRequest[]) => void; onLogin: (user: AccessUser) => void }) {
-  const [mode, setMode] = useState<"login" | "register">("login");
-  const [message, setMessage] = useState("");
-  const [form, setForm] = useState({ name: "", email: "", phone: "", company: "", store: "", password: "", confirm: "" });
-  const update = (key: keyof typeof form) => (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm((current) => ({ ...current, [key]: event.target.value }));
-  const submit = (event: React.FormEvent) => {
-    event.preventDefault(); setMessage("");
-    if (mode === "login") {
-      const user = users.find((item) => item.email.toLowerCase() === form.email.trim().toLowerCase());
-      if (user?.resetNotice) return setMessage(user.resetNotice);
-      if (!user || user.password !== form.password) return setMessage("E-mail ou senha inválidos.");
-      if (user.status === "pending") return setMessage("Seu cadastro ainda está aguardando aprovação do administrador.");
-      if (user.status === "rejected") return setMessage("Seu acesso à Sfera não foi aprovado. Entre em contato com o administrador responsável.");
-      if (user.status === "inactive") return setMessage("Seu acesso está inativo. Entre em contato com um administrador.");
-      return onLogin(user);
-    }
-    if (!form.name || !form.email || !form.company || !form.store || form.password.length < 6) return setMessage("Preencha todos os campos obrigatórios. A senha deve ter pelo menos 6 caracteres.");
-    if (form.password !== form.confirm) return setMessage("As senhas não coincidem.");
-    if (users.some((item) => item.email.toLowerCase() === form.email.trim().toLowerCase())) return setMessage("Este e-mail já possui um cadastro.");
-    const user: AccessUser = { id: `${Date.now()}`, name: form.name.trim(), email: form.email.trim(), phone: form.phone.trim(), company: form.company.trim(), accountType: "unit", stores: [form.store], password: form.password, mustChangePassword: true, status: "pending", requestedAt: new Date().toISOString(), active: true };
-    onUsersChange([...users, user]); setMessage("Cadastro realizado com sucesso! Seu acesso à Sfera está aguardando aprovação de um administrador. Assim que sua conta for aprovada, você poderá acessar a plataforma."); setMode("login");
-  };
-  const requestReset = () => {
-    const email = form.email.trim().toLowerCase();
-    const user = users.find((item) => item.email.toLowerCase() === email);
-    if (!email || !user) return setMessage("Informe um e-mail cadastrado para solicitar a redefinição.");
-    if (user.status !== "approved") return setMessage("A redefinição só pode ser solicitada por usuários aprovados.");
-    if (resetRequests.some((item) => item.userId === user.id && item.status === "pending")) return setMessage("Já existe uma solicitação aguardando aprovação do administrador.");
-    onResetRequestsChange([...resetRequests, { id: `${Date.now()}`, userId: user.id, name: user.name, email: user.email, requestedAt: new Date().toISOString(), status: "pending" }]);
-    setMessage("Solicitação enviada ao administrador. Aguarde a aprovação para receber a senha temporária novamente.");
-  };
-  return <main className="auth-shell"><section className="auth-card"><div className="auth-brand"><img src="/dashboard-logo.png" alt="Sfera Operações" /></div>{mode === "login" ? <><p className="eyebrow">Plataforma de Logística</p><h1>Bem-vindo à Sfera</h1><p className="auth-subtitle">Acesse sua operação e acompanhe o desempenho das unidades.</p></> : <><p className="eyebrow">Novo acesso</p><h1>Criar uma conta</h1><p className="auth-subtitle">Seu cadastro será analisado por um administrador.</p></>}<form className="auth-form" onSubmit={submit}>{mode === "register" && <><label>Nome completo<input value={form.name} onChange={update("name")} required /></label><label>Telefone<input value={form.phone} onChange={update("phone")} /></label><label>Empresa<input value={form.company} onChange={update("company")} required /></label><label>Loja/Unidade<input value={form.store} onChange={update("store")} placeholder="Nome ou código da unidade" required /></label></>}<label>E-mail{mode === "register" && <small>E-mail corporativo</small>}<input type="email" value={form.email} onChange={update("email")} required /></label><label>Senha<input type="password" value={form.password} onChange={update("password")} required /></label>{mode === "register" && <label>Confirmação de senha<input type="password" value={form.confirm} onChange={update("confirm")} required /></label>}<button className="primary-button" type="submit">{mode === "login" ? "Entrar" : "Enviar cadastro"}</button></form>{message && <p className="auth-message">{message}</p>}{mode === "login" ? <div className="auth-links"><button onClick={requestReset}>Esqueci minha senha</button><button onClick={() => { setMode("register"); setMessage(""); }}>Criar uma conta</button></div> : <button className="auth-back" onClick={() => { setMode("login"); setMessage(""); }}>Voltar para o login</button>}<small className="auth-note">Em caso de dúvidas, entrar em contato com: carlos.saraiva@sferamultifranquias.com</small></section></main>;
-}
-
-function PasswordChangeScreen({ user, users, onUsersChange, onComplete }: { user: AccessUser; users: AccessUser[]; onUsersChange: (users: AccessUser[]) => void; onComplete: (user: AccessUser) => void }) {
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [message, setMessage] = useState("");
-  const submit = (event: React.FormEvent) => {
-    event.preventDefault();
-    if (password.length < 6) return setMessage("A nova senha deve ter pelo menos 6 caracteres.");
-    if (password !== confirm) return setMessage("As senhas não coincidem.");
-    const updated = { ...user, password, mustChangePassword: false };
-    onUsersChange(users.map((item) => item.id === user.id ? updated : item));
-    onComplete(updated);
-  };
-  return <main className="auth-shell"><section className="auth-card"><div className="auth-brand"><span>S</span><strong>Sfera</strong></div><p className="eyebrow">Primeiro acesso</p><h1>Defina sua senha</h1><p className="auth-subtitle">Por segurança, troque a senha temporária antes de continuar.</p><form className="auth-form" onSubmit={submit}><label>Nova senha<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} minLength={6} required autoFocus /></label><label>Confirmação de senha<input type="password" value={confirm} onChange={(event) => setConfirm(event.target.value)} minLength={6} required /></label><button className="primary-button" type="submit">Salvar nova senha</button></form>{message && <p className="auth-message">{message}</p>}<small className="auth-note">Em caso de dúvidas, entrar em contato com: carlos.saraiva@sferamultifranquias.com</small></section></main>;
-}
 
 function ProfileView({ user, stores }: { user: AccessUser; stores: Array<{ store: string; storeCode: string | null }> }) {
   const allowedStores = user.accountType === "admin" ? stores : stores.filter((item) => user.stores.includes(item.store));
@@ -704,70 +654,6 @@ function ProfileView({ user, stores }: { user: AccessUser; stores: Array<{ store
   return <><section className="page-head"><div><span className="eyebrow">Conta</span><h1>Meu perfil</h1><p>Confira suas informações cadastrais e permissões de acesso.</p></div><UserCircle size={34} /></section><section className="profile-grid"><article className="panel profile-card"><div className="profile-avatar">{user.name.trim().charAt(0).toUpperCase()}</div><div><h2>{user.name}</h2><p>{user.email}</p><span className={`access-status ${user.status}`}>{statusLabel}</span></div></article><article className="panel profile-details"><h2>Informações cadastrais</h2><dl><div><dt>Nome completo</dt><dd>{user.name}</dd></div><div><dt>E-mail</dt><dd>{user.email}</dd></div><div><dt>Telefone</dt><dd>{user.phone || "Não informado"}</dd></div><div><dt>Empresa</dt><dd>{user.company || "Não informado"}</dd></div><div><dt>Tipo de conta</dt><dd>{user.accountType === "admin" ? "Administrador" : "Usuário da Unidade"}</dd></div><div><dt>Cadastro realizado em</dt><dd>{user.requestedAt ? new Date(user.requestedAt).toLocaleString("pt-BR") : "Não informado"}</dd></div></dl></article><article className="panel profile-stores"><h2>Lojas/unidades com acesso</h2>{user.accountType === "admin" ? <p className="profile-all-stores">Administrador: acesso a todas as lojas.</p> : allowedStores.length ? <div className="profile-store-list">{allowedStores.map((item) => <div key={item.store}><strong>{item.store}</strong><small>Código {item.storeCode || "—"}</small></div>)}</div> : <p className="muted">Nenhuma loja vinculada.</p>}</article></section></>;
 }
 
-function CadastroView({
-  stores, users, onUsersChange, resetRequests, onResetRequestsChange, onViewStore,
-}: {
-  stores: Array<{ store: string; storeCode: string | null }>;
-  users: AccessUser[];
-  onUsersChange: (users: AccessUser[]) => void;
-  resetRequests: PasswordResetRequest[];
-  onResetRequestsChange: (requests: PasswordResetRequest[]) => void;
-  onViewStore: (store: string) => void;
-}) {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [accountType, setAccountType] = useState<AccessUser["accountType"]>("unit");
-  const [selectedStores, setSelectedStores] = useState<string[]>(stores[0] ? [stores[0].store] : []);
-  const [search, setSearch] = useState("");
-  const [showForm, setShowForm] = useState(false);
-  const [editingUserId, setEditingUserId] = useState<string | null>(null);
-  const [editName, setEditName] = useState("");
-  const [editEmail, setEditEmail] = useState("");
-  const [editType, setEditType] = useState<AccessUser["accountType"]>("unit");
-  const [editStatus, setEditStatus] = useState<AccessUser["status"]>("approved");
-  const [passwordResetMessage, setPasswordResetMessage] = useState("");
-  const [userFilters, setUserFilters] = useState({ name: "", email: "", type: "", pdv: "", status: "" });
-  const normalizedSearch = normalizeText(search);
-  const filteredStores = stores.filter((item) => !normalizedSearch || normalizeText(`${item.store} ${item.storeCode}`).includes(normalizedSearch));
-  const visibleUsers = users.filter((user) => {
-    const type = user.accountType === "admin" ? "Administrador" : "Usuário da Unidade";
-    const status = { pending: "Aguardando aprovação", approved: "Aprovado", rejected: "Recusado", inactive: "Inativo" }[user.status];
-    const pdvText = user.accountType === "admin" ? "todas as lojas" : user.stores.join(" ");
-    return (!userFilters.name || normalizeText(user.name).includes(normalizeText(userFilters.name))) && (!userFilters.email || normalizeText(user.email).includes(normalizeText(userFilters.email))) && (!userFilters.type || type === userFilters.type) && (!userFilters.pdv || normalizeText(pdvText).includes(normalizeText(userFilters.pdv))) && (!userFilters.status || status === userFilters.status);
-  });
-  const addUser = (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!name.trim() || !email.trim() || (accountType === "unit" && !selectedStores.length)) return;
-    const next = [...users, { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, name: name.trim(), email: email.trim(), accountType, stores: accountType === "admin" ? [] : selectedStores, password: TEMP_PASSWORD, mustChangePassword: true, status: "approved" as const, active: true }];
-    onUsersChange(next); setName(""); setEmail(""); setShowForm(false);
-  };
-  const removeUser = (id: string) => onUsersChange(users.filter((user) => user.id !== id));
-  const updateUserStores = (userId: string, store: string, checked: boolean) => onUsersChange(users.map((user) => user.id !== userId || user.accountType === "admin" ? user : { ...user, stores: checked ? [...new Set([...user.stores, store])] : user.stores.filter((item) => item !== store) }));
-  const openUserEditor = (user: AccessUser) => { setEditingUserId(user.id); setEditName(user.name); setEditEmail(user.email); setEditType(user.accountType); setEditStatus(user.status); };
-  const saveUserEditor = () => { if (!editingUserId || !editName.trim() || !editEmail.trim()) return; onUsersChange(users.map((user) => user.id === editingUserId ? { ...user, name: editName.trim(), email: editEmail.trim(), accountType: editType, status: editStatus, active: editStatus === "approved", stores: editType === "admin" ? [] : user.stores } : user)); setEditingUserId(null); };
-  const resetUserPassword = (user: AccessUser) => {
-    onUsersChange(users.map((item) => item.id === user.id ? { ...item, password: TEMP_PASSWORD, mustChangePassword: true, resetNotice: undefined } : item));
-    setPasswordResetMessage(`Senha temporária definida para ${user.name}: ${TEMP_PASSWORD}. No próximo acesso, a troca será obrigatória.`);
-  };
-  const updateResetRequest = (request: PasswordResetRequest, status: PasswordResetRequest["status"]) => {
-    onResetRequestsChange(resetRequests.map((item) => item.id === request.id ? { ...item, status } : item));
-    if (status === "approved") onUsersChange(users.map((item) => item.id === request.userId ? { ...item, password: TEMP_PASSWORD, mustChangePassword: true, resetNotice: undefined } : item));
-    if (status === "rejected") onUsersChange(users.map((item) => item.id === request.userId ? { ...item, resetNotice: "Sua solicitação de redefinição de senha foi negada pelo administrador. Entre em contato com o responsável." } : item));
-  };
-  return <div className="cadastro-page">
-    <section className="panel users-master-panel"><div className="section-title"><div><h2>Usuários cadastrados</h2><p>Aprovados e pendentes em uma única lista. Use os filtros para localizar qualquer cadastro.</p></div><Users size={20} /></div>{passwordResetMessage && <p className="auth-message">{passwordResetMessage}</p>}<div className="table-wrap users-master-table-wrap"><table className="cadastro-table users-master-table"><thead><tr><th><details className="column-filter"><summary>Nome ↕</summary><div className="column-filter-menu"><input value={userFilters.name} onChange={(event) => setUserFilters((current) => ({ ...current, name: event.target.value }))} placeholder="Buscar nome..." /></div></details></th><th><details className="column-filter"><summary>Usuário ↕</summary><div className="column-filter-menu"><input value={userFilters.email} onChange={(event) => setUserFilters((current) => ({ ...current, email: event.target.value }))} placeholder="Buscar usuário..." /></div></details></th><th><details className="column-filter"><summary>Perfil ↕</summary><div className="column-filter-menu"><select value={userFilters.type} onChange={(event) => setUserFilters((current) => ({ ...current, type: event.target.value }))}><option value="">Todos</option><option>Administrador</option><option>Usuário da Unidade</option></select></div></details></th><th><details className="column-filter"><summary>PDVs vinculados ⌄</summary><div className="column-filter-menu"><input value={userFilters.pdv} onChange={(event) => setUserFilters((current) => ({ ...current, pdv: event.target.value }))} placeholder="Buscar PDV..." /></div></details></th><th><details className="column-filter"><summary>Status ↕</summary><div className="column-filter-menu"><select value={userFilters.status} onChange={(event) => setUserFilters((current) => ({ ...current, status: event.target.value }))}><option value="">Todos</option><option>Aguardando aprovação</option><option>Aprovado</option><option>Recusado</option><option>Inativo</option></select></div></details></th><th>AÇÕES</th></tr></thead><tbody>{visibleUsers.map((user) => { const statusLabel = { pending: "Aguardando aprovação", approved: "Aprovado", rejected: "Recusado", inactive: "Inativo" }[user.status]; const updateStatus = (status: AccessUser["status"]) => onUsersChange(users.map((item) => item.id === user.id ? { ...item, status, active: status === "approved" } : item)); return <tr key={user.id}><th>{user.name}</th><td>{user.email}</td><td>{user.accountType === "admin" ? "Administrador" : "Usuário da Unidade"}</td><td>{user.accountType === "admin" ? "Todas as lojas" : `${user.stores.length} loja${user.stores.length === 1 ? "" : "s"}`}</td><td><span className={`access-status ${user.status}`}>{statusLabel}</span></td><td><button type="button" className="table-action" onClick={() => setEditingUserId(editingUserId === user.id ? null : user.id)}>{editingUserId === user.id ? "Fechar PDVs" : "Ver/editar PDVs"}</button>{user.status === "pending" && <button type="button" className="table-action" onClick={() => updateStatus("approved")}>Aprovar</button>}<button type="button" className="table-action" onClick={() => resetUserPassword(user)}>Redefinir senha</button><button type="button" className="table-action danger" onClick={() => removeUser(user.id)}>Remover</button></td></tr>; })}</tbody></table>{!visibleUsers.length && <p className="muted cadastro-empty">Nenhum usuário encontrado.</p>}</div></section>
-    <section className="panel user-directory-panel"><div className="section-title"><div><h2>Lista de usuários</h2><p>Consulte os dados de cada pessoa e gerencie as unidades permitidas.</p></div><Users size={20} /></div><div className="user-directory-list">{users.map((user) => { const selected = editingUserId === user.id; const statusLabel = { pending: "Aguardando aprovação", approved: "Aprovado", rejected: "Recusado", inactive: "Inativo" }[user.status]; const allowed = user.accountType === "admin" ? "Todas as lojas" : `${user.stores.length} loja${user.stores.length === 1 ? "" : "s"}`; return <div className="user-directory-row" key={user.id}><div><strong>{user.name}</strong><small>{user.email}</small></div><div className="user-directory-meta"><span>{user.accountType === "admin" ? "Administrador" : "Usuário da Unidade"}</span><span>{allowed}</span><span className={`access-status ${user.status}`}>{statusLabel}</span><button type="button" className="table-action" onClick={() => setEditingUserId(selected ? null : user.id)}>{selected ? "Fechar PDVs" : "Ver/editar PDVs"}</button></div></div>; })}{!users.length && <p className="muted cadastro-empty">Nenhum usuário cadastrado ainda.</p>}</div></section>
-    {editingUserId && (() => { const user = users.find((item) => item.id === editingUserId); if (!user) return null; return <section className="panel user-edit-modal"><div className="section-title"><div><h2>Editar usuário</h2><p>Atualize as informações cadastrais e permissões.</p></div><button type="button" className="table-action icon-action" aria-label="Fechar editor" onClick={() => setEditingUserId(null)}>×</button></div><div className="user-edit-form"><label>Nome<input value={editName} onChange={(event) => setEditName(event.target.value)} /></label><label>Usuário / e-mail<input value={editEmail} onChange={(event) => setEditEmail(event.target.value)} /></label><label>Perfil<select value={editType} onChange={(event) => setEditType(event.target.value as AccessUser["accountType"])}><option value="admin">Administrador</option><option value="unit">Usuário da Unidade</option></select></label><label>Status<select value={editStatus} onChange={(event) => setEditStatus(event.target.value as AccessUser["status"])}><option value="approved">Aprovado</option><option value="pending">Aguardando aprovação</option><option value="rejected">Recusado</option><option value="inactive">Inativo</option></select></label></div>{editType === "admin" ? <p className="muted">Administrador tem acesso a todas as lojas.</p> : <div className="user-store-options">{stores.map((item) => <label key={item.store}><input type="checkbox" checked={user.stores.includes(item.store)} onChange={(event) => updateUserStores(user.id, item.store, event.target.checked)} /><span>{item.store}<small>{item.storeCode || "sem código"}</small></span></label>)}</div>}<div className="user-edit-actions"><button type="button" className="table-action" onClick={() => setEditingUserId(null)}>Cancelar</button><button type="button" className="primary-button" onClick={saveUserEditor}>Salvar</button></div></section>; })()}
-    <section className="page-head"><div><span className="eyebrow">Administração</span><h1>Usuários</h1><p>Usuários cadastrados, perfis e permissões de acesso.</p></div><button className="primary-button cadastro-new-button" onClick={() => setShowForm((current) => !current)}>{showForm ? "Fechar cadastro" : "Cadastrar nova pessoa"}</button></section>
-    <section className="cadastro-grid">
-      {false && <article className="panel cadastro-panel"><div className="section-title"><div><h2>PDVs cadastrados</h2><p>Somente unidades já presentes na base de dados.</p></div><Store size={20} /></div><input className="cadastro-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar loja ou código" /><div className="pdv-list">{filteredStores.map((item) => { const linkedUsers = users.filter((user) => user.accountType === "admin" || user.stores.includes(item.store)); return <div className="pdv-row" key={item.store}><div><strong>{item.store}</strong><small>Código {item.storeCode || "—"}</small>{linkedUsers.length > 0 ? <div className="pdv-users"><small>Usuários vinculados</small>{linkedUsers.map((user) => <span key={user.id}><strong>{user.name}</strong><small>{user.email} · {user.accountType === "admin" ? "Administrador" : "Usuário da Unidade"}</small></span>)}</div> : <small className="pdv-users-empty">Nenhum usuário vinculado</small>}</div></div>; })}{!filteredStores.length && <p className="muted">Nenhum PDV encontrado.</p>}</div></article>}
-      {showForm && <article className="panel cadastro-panel"><div className="section-title"><div><h2>Novo usuário</h2><p>Defina o tipo de conta e o escopo de visualização.</p></div><Users size={20} /></div><form className="cadastro-form" onSubmit={addUser}><label>Nome<input value={name} onChange={(event) => setName(event.target.value)} placeholder="Nome completo" required /></label><label>E-mail<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="usuario@empresa.com" required /></label><label>Tipo de Conta<select value={accountType} onChange={(event) => setAccountType(event.target.value as AccessUser["accountType"])}><option value="admin">Administrador</option><option value="unit">Usuário da Unidade</option></select></label>{accountType === "unit" && <fieldset className="store-selector"><legend>Lojas/unidades permitidas</legend>{stores.map((item) => <label key={item.store}><input type="checkbox" checked={selectedStores.includes(item.store)} onChange={(event) => setSelectedStores((current) => event.target.checked ? [...current, item.store] : current.filter((store) => store !== item.store))} /><span>{item.store}<small>{item.storeCode || "sem código"}</small></span></label>)}</fieldset>}<button className="primary-button" type="submit">Cadastrar usuário</button></form></article>}
-    </section>
-    <section className="panel cadastro-users-panel"><div className="section-title"><div><h2>Usuários e permissões</h2><p>Administradores têm acesso completo; usuários da unidade veem somente as lojas vinculadas.</p></div></div><div className="table-wrap"><table className="cadastro-table"><thead><tr><th>Usuário</th><th>Tipo de Conta</th><th>Lojas permitidas</th><th>Status</th><th>Ação</th></tr></thead><tbody>{users.map((user) => { const allowed = user.accountType === "admin" ? "Todas as lojas" : user.stores.map((store) => stores.find((item) => item.store === store)?.storeCode ? `${store} (${stores.find((item) => item.store === store)?.storeCode})` : store).join(", "); const statusLabel = { pending: "Aguardando aprovação", approved: "Aprovado", rejected: "Recusado", inactive: "Inativo" }[user.status]; const updateStatus = (status: AccessUser["status"]) => onUsersChange(users.map((item) => item.id === user.id ? { ...item, status, active: status === "approved" } : item)); return <tr key={user.id}><th><strong>{user.name}</strong><small>{user.email}</small></th><td>{user.accountType === "admin" ? "Administrador" : "Usuário da Unidade"}</td><td>{allowed || "—"}</td><td><span className={`access-status ${user.status}`}>{statusLabel}</span></td><td>{user.status === "pending" && <><button className="table-action" onClick={() => updateStatus("approved")}>Aprovar</button><button className="table-action danger" onClick={() => updateStatus("rejected")}>Recusar</button></>}{user.accountType === "unit" && user.stores[0] && user.status === "approved" && <button className="table-action" onClick={() => onViewStore(user.stores[0])}>Visualizar PDV</button>}<button className="table-action danger" onClick={() => removeUser(user.id)}>Remover</button></td></tr>; })}</tbody></table>{!users.length && <p className="muted cadastro-empty">Nenhum usuário cadastrado ainda.</p>}</div></section>
-    <section className="panel cadastro-reset-panel"><div className="section-title"><div><h2>Solicitações de redefinição</h2><p>Aprove ou recuse pedidos de recuperação de senha.</p></div></div><div className="table-wrap"><table className="cadastro-table"><thead><tr><th>Usuário</th><th>Data</th><th>Status</th><th>Ação</th></tr></thead><tbody>{resetRequests.map((request) => <tr key={request.id}><th><strong>{request.name}</strong><small>{request.email}</small></th><td>{new Date(request.requestedAt).toLocaleString("pt-BR")}</td><td><span className={`access-status ${request.status}`}>{request.status === "pending" ? "Aguardando aprovação" : request.status === "approved" ? "Aprovada" : "Recusada"}</span></td><td>{request.status === "pending" && <><button className="table-action" onClick={() => updateResetRequest(request, "approved")}>Aprovar</button><button className="table-action danger" onClick={() => updateResetRequest(request, "rejected")}>Recusar</button></>}</td></tr>)}</tbody></table>{!resetRequests.length && <p className="muted cadastro-empty">Nenhuma solicitação pendente.</p>}</div></section>
-    <p className="cadastro-disclaimer">Os vínculos são salvos neste navegador. A autenticação real e o controle de sessão ainda precisam ser conectados ao servidor para restringir acessos de forma segura.</p>
-  </div>;
-}
 
 export default function Home() {
   const [data, setData] = useState<DashboardData | null>(null);
@@ -786,10 +672,12 @@ export default function Home() {
   const [statusFilter, setStatusFilter] = useState("");
   const [activeIndicator, setActiveIndicator] = useState("");
   const [activeStore, setActiveStore] = useState("");
-  const [accessUsers, setAccessUsers] = useState<AccessUser[]>([]);
-  const [resetRequests, setResetRequests] = useState<PasswordResetRequest[]>([]);
-  const [sessionUserId, setSessionUserId] = useState("");
+  const [currentUser, setCurrentUser] = useState<AccessUser | null>(null);
+  const [authError, setAuthError] = useState("");
   const [authReady, setAuthReady] = useState(false);
+  const sessionRevision = useRef(0);
+  const sessionTransition = useRef(false);
+  const [signingOut, setSigningOut] = useState(false);
   const [overviewRotation, setOverviewRotation] = useState(0);
   const [rotationPulse, setRotationPulse] = useState(false);
   const lastOverviewInteraction = useRef(Date.now());
@@ -809,38 +697,47 @@ export default function Home() {
     return () => { window.clearInterval(timer); events.forEach((event) => window.removeEventListener(event, markInteraction)); };
   }, [view]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const loadAccess = async () => {
-      try {
-        const response = await fetch("/api/auth", { cache: "no-store" });
-        if (!response.ok) throw new Error("auth api unavailable");
-        const body = await response.json() as { users?: AccessUser[]; resetRequests?: PasswordResetRequest[] };
-        if (!cancelled) {
-          setAccessUsers(Array.isArray(body.users) ? body.users : []);
-          setResetRequests(Array.isArray(body.resetRequests) ? body.resetRequests : []);
-        }
-      } catch {
-        // Compatibilidade com versões locais antigas: o servidor continua sendo a fonte
-        // principal, mas o navegador local ainda permite abrir uma instalação offline.
-        try {
-          const saved = window.localStorage.getItem("operacoes-access-users");
-          if (saved && !cancelled) setAccessUsers(JSON.parse(saved) as AccessUser[]);
-          const savedRequests = window.localStorage.getItem("operacoes-password-reset-requests");
-          if (savedRequests && !cancelled) setResetRequests(JSON.parse(savedRequests) as PasswordResetRequest[]);
-        } catch { /* storage indisponível */ }
-      } finally {
-        try { const session = window.localStorage.getItem("operacoes-session-user"); if (session && !cancelled) setSessionUserId(session); } catch { /* storage indisponível */ }
-        if (!cancelled) setAuthReady(true);
-      }
-    };
-    loadAccess();
-    return () => { cancelled = true; };
+  const refreshSession = useCallback(async () => {
+    if (sessionTransition.current) return;
+    const revision = ++sessionRevision.current;
+    try {
+      const body = await authRequest<{ user: AccessUser | null }>();
+      if (revision !== sessionRevision.current) return;
+      setCurrentUser(body.user);
+      setAuthError("");
+    } catch (caught) {
+      if (revision !== sessionRevision.current) return;
+      setCurrentUser(null);
+      setAuthError(caught instanceof Error ? caught.message : "Não foi possível verificar o acesso.");
+    } finally { if (revision === sessionRevision.current) setAuthReady(true); }
   }, []);
-  const saveAuthPatch = (payload: Record<string, unknown>) => { void fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).catch(() => undefined); };
-  const saveAccessUsers = (users: AccessUser[]) => { setAccessUsers(users); saveAuthPatch({ users }); try { window.localStorage.setItem("operacoes-access-users", JSON.stringify(users)); } catch { /* storage indisponível */ } };
-  const saveResetRequests = (requests: PasswordResetRequest[]) => { setResetRequests(requests); saveAuthPatch({ resetRequests: requests }); try { window.localStorage.setItem("operacoes-password-reset-requests", JSON.stringify(requests)); } catch { /* storage indisponível */ } };
-  useEffect(() => { if (authReady && !accessUsers.length) { const admin: AccessUser = { id: "admin-inicial", name: "Administrador Sfera", email: "admin@sfera.local", accountType: "admin", stores: [], password: TEMP_PASSWORD, mustChangePassword: true, status: "approved", active: true }; saveAccessUsers([admin]); } }, [authReady, accessUsers.length]);
+  const acceptSession = useCallback((user: AccessUser) => {
+    ++sessionRevision.current;
+    setCurrentUser(user); setAuthError(""); setView("overview");
+  }, []);
+  useEffect(() => { void refreshSession(); }, [refreshSession]);
+  useEffect(() => {
+    if (!currentUser) return;
+    const recheck = () => { if (document.visibilityState === "visible") void refreshSession(); };
+    const interval = window.setInterval(recheck, 30000);
+    window.addEventListener("focus", recheck);
+    document.addEventListener("visibilitychange", recheck);
+    return () => { window.clearInterval(interval); window.removeEventListener("focus", recheck); document.removeEventListener("visibilitychange", recheck); };
+  }, [currentUser?.id, refreshSession]);
+  const logout = async () => {
+    if (sessionTransition.current) return;
+    sessionTransition.current = true;
+    setSigningOut(true);
+    const revision = ++sessionRevision.current;
+    try {
+      await authRequest({ action: "logout" });
+      if (revision !== sessionRevision.current) return;
+      setCurrentUser(null); setData(null); setRecurrenceRecords([]); setView("overview"); setAuthError("");
+    } catch (caught) {
+      if (revision !== sessionRevision.current) return;
+      setAuthError(caught instanceof Error ? caught.message : "Não foi possível sair. Tente novamente.");
+    } finally { sessionTransition.current = false; setSigningOut(false); }
+  };
 
   const load = useCallback(async (manual = false) => {
     setRefreshing(true); setError("");
@@ -858,8 +755,8 @@ export default function Home() {
   useEffect(() => {
     // A leitura inicial sincroniza a interface com a API local do Excel.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    load();
-  }, [load]);
+    if (currentUser && !currentUser.mustChangePassword) void load();
+  }, [load, currentUser?.id, currentUser?.mustChangePassword]);
 
   useEffect(() => {
     if (view !== "recurrence" || !data || recurrenceRecords.length) return;
@@ -945,9 +842,9 @@ export default function Home() {
   ] as const;
 
   if (!authReady) return <main className="fatal"><RefreshCw className="spin" size={36} /><h1>Preparando acesso</h1></main>;
-  const currentUser = accessUsers.find((user) => user.id === sessionUserId);
-  if (!currentUser) return <AuthScreen users={accessUsers} onUsersChange={saveAccessUsers} resetRequests={resetRequests} onResetRequestsChange={saveResetRequests} onLogin={(user) => { setSessionUserId(user.id); try { window.localStorage.setItem("operacoes-session-user", user.id); } catch { /* storage indisponível */ } }} />;
-  if (currentUser.mustChangePassword) return <PasswordChangeScreen user={currentUser} users={accessUsers} onUsersChange={saveAccessUsers} onComplete={(user) => { setSessionUserId(user.id); try { window.localStorage.setItem("operacoes-session-user", user.id); } catch { /* storage indisponível */ } }} />;
+  if (authError && !currentUser) return <main className="fatal"><h1>Não foi possível verificar o acesso</h1><p>{authError}</p><button onClick={() => void refreshSession()}>Tentar novamente</button></main>;
+  if (!currentUser) return <AuthScreen onLogin={acceptSession} />;
+  if (currentUser.mustChangePassword) return <PasswordChangeScreen user={currentUser} onComplete={acceptSession} onLogout={logout} sessionError={authError} />;
   if (!data && error) return <main className="fatal"><Database size={42} /><h1>Fonte de dados indisponível</h1><p>{error}</p><code>{API}</code><button onClick={() => load()}>Tentar novamente</button></main>;
   if (!data || !workingData) return <main className="fatal"><RefreshCw className="spin" size={36} /><h1>Preparando a operação</h1><p>Lendo e normalizando as 11 abas do Excel.</p></main>;
 
@@ -964,12 +861,13 @@ export default function Home() {
         <header className="topbar">
           <button className="menu-button" onClick={() => setMenuOpen(true)}><Menu /></button>
           <div><p>Dashboard de Operações</p><span>Última atualização: {shortDate.format(new Date(data.source.modifiedAt))}</span></div><img className="topbar-logo" src="/dashboard-logo.png" alt="Sfera Operações" />
-          <div className="topbar-actions"><button className="refresh" onClick={() => load(true)} disabled={refreshing}><RefreshCw className={refreshing ? "spin" : ""} size={17} />Atualizar dados</button><button className="refresh logout-button" onClick={() => { setSessionUserId(""); try { window.localStorage.removeItem("operacoes-session-user"); } catch { /* storage indisponível */ } }}>Sair</button></div>
+          <div className="topbar-actions"><button className="refresh" onClick={() => load(true)} disabled={refreshing}><RefreshCw className={refreshing ? "spin" : ""} size={17} />Atualizar dados</button><button className="refresh logout-button" onClick={() => void logout()} disabled={signingOut}>{signingOut ? "Saindo…" : "Sair"}</button></div>
         </header>
 
         <Filters data={data} store={store} setStore={setStore} cycle={cycle} setCycle={setCycle} startDate={startDate} setStartDate={setStartDate} endDate={endDate} setEndDate={setEndDate} indicator={indicatorFilter} setIndicator={setIndicatorFilter} status={statusFilter} setStatus={setStatusFilter} />
 
         <div className="content">
+          {authError && <p className="auth-message access-error" role="alert">{authError}</p>}
           {view === "overview" && <>
             <section className="page-head"><div><span className="eyebrow">Visão executiva</span><h1>Visão Geral da Operação</h1><p>O que está saudável, onde agir e quais lojas exigem atenção.</p></div><span className="data-chip">{filteredIndicators.reduce((sum, item) => sum + item.records.length, 0).toLocaleString("pt-BR")} registros no recorte</span></section>
             {rotationEntry && <section className={`panel overview-rotation-card${rotationPulse ? " rotation-pulse" : ""}`}><div className="section-title"><div><h2>Resumo rotativo</h2><p>Visão 360° de cada loja, com todos os indicadores.</p></div><span className="rotation-timer">Troca após 10s sem interação</span></div><div className="rotation-store-card"><div className="rotation-heading"><span>Visão 360° da loja</span><strong>{rotationEntry.store.store}</strong><small>{rotationEntry.store.storeCode || "—"}</small></div><div className="rotation-store-metrics">{filteredIndicators.map((metric) => { const result = rotationEntry.store.indicators[metric.id]; return <div key={metric.id}><span>{metric.label}</span><strong><ResultValue result={result} id={metric.id} /></strong><Badge status={result?.status || "unknown"} informational={isInformational(metric.id)} /></div>; })}</div></div><div className="rotation-dots" aria-label="Navegação do resumo rotativo"><button type="button" onClick={() => { lastOverviewInteraction.current = Date.now(); setOverviewRotation((rotationPosition - 1 + rotationTotal) % rotationTotal); }}>‹</button><span>{rotationPosition + 1} / {rotationTotal}</span><button type="button" onClick={() => { lastOverviewInteraction.current = Date.now(); setOverviewRotation((rotationPosition + 1) % rotationTotal); }}>›</button></div></section>}
@@ -1026,7 +924,7 @@ export default function Home() {
 
           {view === "quality" && <><section className="page-head"><div><span className="eyebrow">Governança</span><h1>Qualidade dos Dados</h1><p>Problemas registrados sem interromper o restante do dashboard.</p></div></section><section className="summary-grid three"><article><span>Críticos</span><strong>{data.quality.summary.critical || 0}</strong></article><article><span>Altos</span><strong>{data.quality.summary.high || 0}</strong></article><article><span>Médios</span><strong>{data.quality.summary.medium || 0}</strong></article></section><section className="panel issue-list">{data.quality.issues.slice(0, 100).map((item, index) => <div key={index}><span className={`severity ${item.severity}`}>{item.severity}</span><strong>{item.message}</strong><small>{item.indicator ? data.indicators[item.indicator]?.label : item.code}</small></div>)}</section></>}
 
-          {view === "cadastro" && currentUser.accountType === "admin" && <CadastroView stores={data.stores.map(({ store, storeCode }) => ({ store, storeCode }))} users={accessUsers} onUsersChange={saveAccessUsers} resetRequests={resetRequests} onResetRequestsChange={saveResetRequests} onViewStore={(name) => { setStore(name); setActiveStore(name); setView("store"); }} />}
+          {view === "cadastro" && currentUser.accountType === "admin" && <CadastroView stores={data.stores.map(({ store, storeCode }) => ({ store, storeCode }))} currentUser={currentUser} onSessionChange={refreshSession} />}
 
           {view === "profile" && <ProfileView user={currentUser} stores={data.stores.map(({ store, storeCode }) => ({ store, storeCode }))} />}
 
