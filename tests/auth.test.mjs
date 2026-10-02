@@ -207,8 +207,18 @@ test("corrupt or missing existing stores fail closed without creating replacemen
   assert.equal(fs.existsSync(file), false);
 });
 
-test("Railway requires explicit persistent storage and never silently bootstraps an empty volume", async (t) => {
-  const missingVolume = client(createAuthHandlers({ environment: { RAILWAY_PROJECT_ID: "test-project" } }));
+test("Railway without a volume stays online in temporary mode unless a volume is required", async (t) => {
+  const temporary = fixture(t);
+  const browser = client(createAuthHandlers({ ephemeralDataDir: temporary.directory, environment: { RAILWAY_PROJECT_ID: "test-project" } }));
+  assert.equal((await browser.send()).status, 200);
+  const login = await browser.send({ action: "login", email: ADMIN_EMAIL, password: TEMP_PASSWORD });
+  assert.equal(login.status, 200);
+  assert.equal(login.data.user.mustChangePassword, true);
+  assert.ok(fs.existsSync(path.join(temporary.directory, "access-users.json")));
+});
+
+test("Railway requires explicit persistent storage when configured and never silently bootstraps an empty volume", async (t) => {
+  const missingVolume = client(createAuthHandlers({ environment: { RAILWAY_PROJECT_ID: "test-project", ACCESS_REQUIRE_VOLUME: "true" } }));
   const denied = await missingVolume.send();
   assert.equal(denied.status, 503);
   assert.match(denied.data.error, /volume persistente/);

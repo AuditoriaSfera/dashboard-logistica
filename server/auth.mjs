@@ -164,13 +164,17 @@ export function createAuthHandlers(options = {}) {
   const environment = options.environment || process.env;
   const now = options.now || Date.now;
   const explicitDataDir = options.dataDir || environment.ACCESS_DATA_DIR || environment.RAILWAY_VOLUME_MOUNT_PATH;
-  const dataDir = path.resolve(explicitDataDir || path.join(process.cwd(), "data"));
+  const railway = Boolean(environment.RAILWAY_PROJECT_ID || environment.RAILWAY_ENVIRONMENT_ID || environment.RAILWAY_ENVIRONMENT || environment.RAILWAY_SERVICE_ID);
+  // Sem volume no Railway o serviço continua no ar em modo temporário: a base de usuários fica no disco
+  // do container e volta ao administrador inicial a cada deploy. ACCESS_REQUIRE_VOLUME=true restaura o bloqueio.
+  const ephemeral = railway && !explicitDataDir && environment.ACCESS_REQUIRE_VOLUME !== "true";
+  const dataDir = path.resolve(explicitDataDir || options.ephemeralDataDir || path.join(process.cwd(), "data"));
   const storePath = path.join(dataDir, "access-users.json");
   // Explicit test directories never fall back to the real working directory.
-  const legacyDir = path.resolve(options.legacyDataDir || (options.dataDir ? dataDir : path.join(process.cwd(), "data")));
+  const legacyDir = path.resolve(options.legacyDataDir || (options.dataDir || options.ephemeralDataDir ? dataDir : path.join(process.cwd(), "data")));
   const legacyPath = path.join(legacyDir, "access-users.json");
   const lockPath = path.join(dataDir, "access-users.lock");
-  const railway = Boolean(environment.RAILWAY_PROJECT_ID || environment.RAILWAY_ENVIRONMENT_ID || environment.RAILWAY_ENVIRONMENT || environment.RAILWAY_SERVICE_ID);
+  if (ephemeral) console.warn("[auth] Railway sem volume persistente: usuários em modo temporário (reiniciam a cada deploy). Crie um volume e defina RAILWAY_VOLUME_MOUNT_PATH para preservar as contas.");
 
   function saveMigration(store) {
     const backupDir = path.join(dataDir, "auth-backups");
@@ -197,7 +201,7 @@ export function createAuthHandlers(options = {}) {
   }
 
   async function withStore(operation) {
-    if (railway && !explicitDataDir) throw new AuthError(503, "Configure um volume persistente para os usuários (RAILWAY_VOLUME_MOUNT_PATH ou ACCESS_DATA_DIR) antes de liberar o acesso.");
+    if (railway && !explicitDataDir && !ephemeral) throw new AuthError(503, "Configure um volume persistente para os usuários (RAILWAY_VOLUME_MOUNT_PATH ou ACCESS_DATA_DIR) antes de liberar o acesso.");
     if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
     const lock = await acquireLock();
     try {
@@ -211,7 +215,7 @@ export function createAuthHandlers(options = {}) {
           // Preserve the source during a move to a volume; only the destination is written.
           saveMigration(store);
         } else {
-          if (railway && environment.ACCESS_ALLOW_INITIAL_SETUP !== "true") throw new AuthError(503, "A base de usuários não está no volume. Restaure a base existente; para uma instalação nova, configure ACCESS_ALLOW_INITIAL_SETUP=true uma única vez.");
+          if (railway && !ephemeral && environment.ACCESS_ALLOW_INITIAL_SETUP !== "true") throw new AuthError(503, "A base de usuários não está no volume. Restaure a base existente; para uma instalação nova, configure ACCESS_ALLOW_INITIAL_SETUP=true uma única vez.");
           store = {
             version: 2,
             users: [{ id: "admin-inicial", name: "Administrador Sfera", email: "admin@sfera.local", accountType: "admin", stores: [], passwordHash: passwordHash(TEMP_PASSWORD), mustChangePassword: true, status: "approved", active: true }],
