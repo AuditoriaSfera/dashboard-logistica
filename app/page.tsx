@@ -45,7 +45,7 @@ type DashboardData = {
   stores: Array<{ store: string; storeCode: string | null; indicators: Record<string, Result> }>;
   alerts: Array<Result & { store: string; storeCode?: string | null; indicator: string }>;
   quality: { issues: Array<{ severity: string; code: string; message: string; indicator?: string }>; summary: Record<string, number> };
-  orders?: { source: { fileName: string; modifiedAt: string; lastImportAt?: string }; period: { start: string | null; end: string | null; days: number }; stores: Array<{ store: string; storeCode: string; total: number; retirada: number; entrega: number; revendedor: number; omni: number; revendedorCategorias?: Record<string, number>; cancelamentoMotivos?: Record<string, [number, number]>; cancelamentoFiscal?: Record<string, [number, number]>; pctEntrega: number; pctRetirada: number; retiradaCancelados: number; entregaCancelados: number; itens: number; mediaRetirada: number; mediaEntrega: number; mediaOmni: number; mediaItens: number }>; daily?: Array<{ date: string; store: string; storeCode: string; total: number; retirada: number; entrega: number; revendedor: number; omni: number; retiradaCancelados: number; entregaCancelados: number; itens: number; revendedorCategorias?: Record<string, number>; cancelamentoMotivos?: Record<string, [number, number]>; cancelamentoFiscal?: Record<string, [number, number]> }>; records?: OrderRecord[] } | null;
+  orders?: { error?: string; source: { fileName: string; modifiedAt: string; lastImportAt?: string }; period: { start: string | null; end: string | null; days: number }; stores: Array<{ store: string; storeCode: string; total: number; retirada: number; entrega: number; revendedor: number; omni: number; revendedorCategorias?: Record<string, number>; cancelamentoMotivos?: Record<string, [number, number]>; cancelamentoFiscal?: Record<string, [number, number]>; pctEntrega: number; pctRetirada: number; retiradaCancelados: number; entregaCancelados: number; itens: number; mediaRetirada: number; mediaEntrega: number; mediaOmni: number; mediaItens: number }>; daily?: Array<{ date: string; store: string; storeCode: string; total: number; retirada: number; entrega: number; revendedor: number; omni: number; retiradaCancelados: number; entregaCancelados: number; itens: number; revendedorCategorias?: Record<string, number>; cancelamentoMotivos?: Record<string, [number, number]>; cancelamentoFiscal?: Record<string, [number, number]> }>; records?: OrderRecord[] } | null;
 };
 
 type OrderRecord = {
@@ -151,7 +151,7 @@ const aggregateRows = (rows: RecordItem[], indicator: Pick<Indicator, "id" | "di
 };
 const periodOf = (row: RecordItem) => row.cycle != null ? String(row.cycle) : row.date || "";
 const recomputeIndicator = (
-  indicator: Pick<Indicator, "id" | "direction" | "configuredTarget" | "generalByCycle">, store: string[], cycle: string, startDate: string, endDate: string,
+  indicator: Pick<Indicator, "id" | "label" | "direction" | "configuredTarget" | "generalByCycle" | "records">, store: string[], cycle: string, startDate: string, endDate: string,
   allStores: Array<{ store: string; storeCode: string | null }>,
 ): Indicator => {
   const recordDate = (row: RecordItem) => (row.date || row.periodEnd || row.periodStart || "").slice(0, 10);
@@ -395,7 +395,7 @@ function RankingCharts({ indicator }: { indicator: Indicator }) {
   return <div className="ranking-charts"><div className="mini-chart"><h3>Distribuição por situação</h3><ResponsiveContainer width="100%" height="100%"><BarChart data={statusData} margin={{ top: 18, right: 16, left: -16, bottom: 8 }}><CartesianGrid vertical={false} stroke="#edf0f4" /><XAxis dataKey="name" tick={{ fontSize: 11 }} /><YAxis allowDecimals={false} tick={{ fontSize: 11 }} /><Tooltip /><Bar dataKey="value" fill="#3157d5" radius={[4, 4, 0, 0]}><LabelList dataKey="value" position="top" /></Bar></BarChart></ResponsiveContainer></div><div className="mini-chart"><h3>Melhores resultados</h3><ResponsiveContainer width="100%" height="100%"><BarChart data={valueData} layout="vertical" margin={{ top: 8, right: 32, left: 46, bottom: 8 }}><CartesianGrid horizontal={false} stroke="#edf0f4" /><XAxis type="number" hide /><YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={48} /><Tooltip formatter={(value) => [isCount ? integer.format(Number(value)) : `${Number(value).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`, "Resultado"]} /><Bar dataKey="value" fill="#4e9f77" radius={[0, 4, 4, 0]}><LabelList dataKey="value" position="right" formatter={(value) => isCount ? integer.format(Number(value)) : `${Number(value).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`} /></Bar></BarChart></ResponsiveContainer></div></div>;
 }
 
-function IndicatorDetailTable({ indicator }: { indicator: Indicator }) {
+function IndicatorDetailTable({ indicator, onStore }: { indicator: Indicator; onStore: (store: string) => void }) {
   const rows = indicator.ranking;
   const receivingDateKeys = indicator.id === "recebimento"
     ? indicator.records.map((item) => String(item.date || item.periodEnd || item.periodStart || "").slice(0, 10)).filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value)).sort()
@@ -405,7 +405,7 @@ function IndicatorDetailTable({ indicator }: { indicator: Indicator }) {
     : 7;
   const receivingWeeks = Math.max(1, receivingDays / 7);
   const weeklyVolume = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 });
-  const detail = (row: (typeof rows)[number]): { primary: string; secondary: string; late?: string; volumes?: string; weeklyVolumes?: string; sold?: string; occurrences?: string; issueBreakdown?: string; skuTotal?: string; arranged?: string; withoutArrangement?: string } => {
+  const detail = (row: (typeof rows)[number]): { primary: string; secondary: string; late?: string; volumes?: string; weeklyVolumes?: string; sold?: string; occurrences?: string; issueBreakdown?: string; skuTotal?: string; arranged?: string; withoutArrangement?: string; label?: string } => {
     let records = indicator.records.filter((item) => item.store === row.store);
     if (indicator.id === "recebimento") {
       // `indicator.records` já chega recortado pelo ciclo/data global. Não
@@ -537,8 +537,8 @@ function OrdersView({ data, selectedStore, cycle, startDate, endDate, onImported
     if (!file) return;
     setUploading(true); setUploadError("");
     try {
-      const response = await fetch(`${API}/api/orders/upload`, { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream", "X-File-Name": file.name }, body: await file.arrayBuffer() });
-      const body = await response.json().catch(() => ({}));
+      const response = await fetch(`${API}/api/orders/upload`, { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream", "X-File-Name": encodeURIComponent(file.name) }, body: await file.arrayBuffer() });
+      const body = (await response.json().catch(() => ({}))) as { error?: string };
       if (!response.ok) throw new Error(body.error || "Não foi possível importar o arquivo.");
       await onImported();
     } catch (error) {
@@ -743,7 +743,7 @@ export default function Home() {
     setRefreshing(true); setError("");
     try {
       const response = await fetch(`${API}/api/${manual ? "refresh" : "dashboard"}`, { method: manual ? "POST" : "GET", cache: "no-store" });
-      const body = await response.json();
+      const body = (await response.json()) as DashboardData & { error?: string };
       if (!response.ok) throw new Error(body.error || "Não foi possível carregar os dados.");
       setData(body);
       setRecurrenceRecords([]);
@@ -765,7 +765,7 @@ export default function Home() {
     setRecurrenceError("");
     fetch(`${API}/api/orders/records`, { cache: "no-store" })
       .then(async (response) => {
-        const body = await response.json();
+        const body = (await response.json()) as { error?: string; records?: OrderRecord[] };
         if (!response.ok) throw new Error(body.error || "Não foi possível carregar os pedidos detalhados.");
         if (!cancelled) setRecurrenceRecords(Array.isArray(body.records) ? body.records : []);
       })
@@ -887,10 +887,10 @@ export default function Home() {
             <section className="page-head"><div><span className="eyebrow">Indicador</span><h1>{chosen.label}</h1><p>Meta, evolução, ranking e registros normalizados.</p></div>{(!isWithdrawal(chosen.id) || store.length > 0) && <Badge status={chosen.current.status} informational={isInformational(chosen.id)} />}</section>
              <section className="summary-grid three"><article><span>{isWithdrawal(chosen.id) ? "Situação" : "Resultado geral"}</span><strong>{isWithdrawal(chosen.id) ? store.length === 1 ? <><ResultValue result={chosen.current} id={chosen.id} /> pedidos em atraso</> : "\u00a0" : <ResultValue result={chosen.current} id={chosen.id} />}</strong></article><article><span>Meta</span><strong>{isInformational(chosen.id) ? "Apenas visualização" : formatTarget(chosen.id, chosen.current.target)}</strong></article><article><span>{isWithdrawal(chosen.id) ? "Apuração" : "Diferença"}</span><strong>{isWithdrawal(chosen.id) ? chosen.label : isInformational(chosen.id) ? "Não se aplica" : deltaText(chosen.current.value, chosen.current.target, chosen.direction, chosen.id)}</strong></article></section>
              {isWithdrawal(chosen.id)
-                  ? <><section className="panel"><h2>{chosen.label}</h2><RankingSummary indicator={chosen} /><IndicatorDetailTable indicator={chosen} /></section><StoreComparisonChart indicator={chosen} /><section className="panel"><h2>{trendTitle(chosen)}</h2><Trend indicator={chosen} selectedCycle={cycle} /></section></>
+                  ? <><section className="panel"><h2>{chosen.label}</h2><RankingSummary indicator={chosen} /><IndicatorDetailTable indicator={chosen} onStore={openStore} /></section><StoreComparisonChart indicator={chosen} /><section className="panel"><h2>{trendTitle(chosen)}</h2><Trend indicator={chosen} selectedCycle={cycle} /></section></>
                 : chosen.id === "medallia"
                   ? <><section className="panel medallia-list-panel"><h2>{chosen.label}</h2><RankingSummary indicator={chosen} /><MedalliaTable indicator={chosen} /></section><StoreComparisonChart indicator={chosen} /><section className="panel"><h2>{trendTitle(chosen)}</h2><Trend indicator={chosen} selectedCycle={cycle} /></section></>
-                  : <><section className="panel"><h2>{chosen.label}</h2><RankingSummary indicator={chosen} />{DETAILED_INDICATORS.has(chosen.id) ? <IndicatorDetailTable indicator={chosen} /> : <Ranking indicator={chosen} onStore={openStore} showMedalliaDetails={Boolean(cycle)} />}</section><StoreComparisonChart indicator={chosen} /><section className="panel"><h2>{trendTitle(chosen)}</h2><Trend indicator={chosen} selectedCycle={cycle} /></section></>}
+                  : <><section className="panel"><h2>{chosen.label}</h2><RankingSummary indicator={chosen} />{DETAILED_INDICATORS.has(chosen.id) ? <IndicatorDetailTable indicator={chosen} onStore={openStore} /> : <Ranking indicator={chosen} onStore={openStore} showMedalliaDetails={Boolean(cycle)} />}</section><StoreComparisonChart indicator={chosen} /><section className="panel"><h2>{trendTitle(chosen)}</h2><Trend indicator={chosen} selectedCycle={cycle} /></section></>}
              {chosen.id === "medallia" && !cycle && <section className="panel"><h2>Principais reclamações</h2><div className="complaints">{chosen.records.filter((item) => item.complaints).slice(-12).map((item, index) => <button key={index} onClick={() => openStore(item.store)}><strong>{item.store} <small>{item.storeCode}</small></strong><span>{item.complaints}</span></button>)}</div></section>}
             {chosen.id.endsWith("cancelados") && <section className="panel"><h2>Saldo Total por loja</h2><p className="muted">Percentual direto da planilha — abaixo de 2% é melhor.</p><div className="chart"><ResponsiveContainer width="100%" height={360}><BarChart data={chosen.ranking.slice().reverse().map((item) => ({ ...item, valuePct: (item.value || 0) * 100 }))} layout="vertical"><CartesianGrid horizontal={false} stroke="#e7e9ed" /><XAxis type="number" unit="%" domain={[0, 100]} /><YAxis dataKey="store" type="category" width={110} tick={{ fontSize: 11 }} /><Tooltip formatter={(value) => [`${Number(value).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%`, "Saldo Total"]} /><ReferenceLine x={2} stroke="#f59e0b" strokeDasharray="4 4" label={{ value: "Meta 2%", position: "insideTopRight", fill: "#b45309", fontSize: 11 }} /><Bar dataKey="valuePct" fill="#3157d5" radius={[0, 5, 5, 0]} /></BarChart></ResponsiveContainer></div></section>}
           </>}

@@ -15,7 +15,11 @@ let lastError = null;
 app.use(cors({ origin: true }));
 app.post("/api/orders/upload", express.raw({ type: () => true, limit: "300mb" }), async (request, response) => {
   try {
-    const originalName = String(request.headers["x-file-name"] || "pedidos-importados.xlsx").replace(/[^\w.\- ]/g, "_");
+    const rawName = String(request.headers["x-file-name"] || "pedidos-importados.xlsx");
+    // O navegador envia o nome com encodeURIComponent para aceitar acentos e símbolos no cabeçalho HTTP.
+    let decodedName = rawName;
+    try { decodedName = decodeURIComponent(rawName); } catch { /* nome legado sem codificação */ }
+    const originalName = decodedName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\w.\- ]/g, "_");
     const extension = originalName.toLowerCase().endsWith(".csv") ? "csv" : "xlsx";
     const target = new URL(`../data/pedidos-importados.${extension}`, import.meta.url);
     fs.mkdirSync(new URL("../data/", import.meta.url), { recursive: true });
