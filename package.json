@@ -12,7 +12,8 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "dev:web": "vinext dev",
     "api": "node server/index.mjs",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "verify": "tsc --noEmit && node --test tests/*.test.mjs && vinext build"
   },
   "dependencies": {
     "chokidar": "^5.0.0",
