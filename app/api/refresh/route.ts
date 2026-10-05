@@ -11,11 +11,9 @@ export const dynamic = "force-dynamic";
 const MAX_WORKBOOK_BYTES = 150 * 1024 * 1024;
 
 function dataDirectory() {
-  const configured = process.env.ACCESS_DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH;
-  if (process.env.NODE_ENV === "production" && !configured) {
-    throw new Error("O servidor ainda não está configurado com armazenamento persistente para atualizar a planilha.");
-  }
-  return configured || path.join(process.cwd(), "data");
+  // Match auth storage: Railway can run without a volume, using container disk
+  // temporarily; when mounted, both users and snapshots use the persistent path.
+  return process.env.ACCESS_DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || path.join(process.cwd(), "data");
 }
 
 async function requireAdministrator(request: Request) {
