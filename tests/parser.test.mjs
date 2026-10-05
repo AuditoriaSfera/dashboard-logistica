@@ -24,8 +24,8 @@ spec("normaliza a dimensão de lojas sem duplicar variações de grafia", () => 
 });
 
 spec("seleciona o ciclo numérico mais recente, não a ordem lexicográfica", () => {
-  assert.equal(data.indicators.medallia.latestKey, 12);
-  assert.equal(data.indicators["pec-omni"].latestKey, 12);
+  assert.equal(data.indicators.medallia.latestKey, 14);
+  assert.equal(data.indicators["pec-omni"].latestKey, 14);
   assert.ok(data.indicators.medallia.current.value >= 0 && data.indicators.medallia.current.value <= 1);
 });
 
@@ -42,6 +42,22 @@ spec("avalia o SLA agregado de recebimento pela meta, não pelo primeiro registr
   assert.equal(current.status, "bad");
 });
 
+spec("combina volumes do chat até a linha 742 e da coluna F a partir da linha 743", () => {
+  const records = data.indicators.recebimento.records;
+  const firstSpreadsheetRow = records.find((row) => row.raw.receivingSheetRow === 743);
+  const spreadsheetRows = records.filter((row) => row.raw.receivingSheetRow >= 743);
+  const chatRows = records.filter((row) => row.raw.receivingSheetRow < 743);
+
+  assert.equal(firstSpreadsheetRow.raw.receivingVolumeSource, "planilha");
+  assert.equal(firstSpreadsheetRow.raw.receivingVolumes, 12);
+  assert.equal(records.find((row) => row.raw.receivingSheetRow === 744).raw.receivingVolumes, 33);
+  assert.ok(spreadsheetRows.every((row) => row.raw.receivingVolumeSource === "planilha"));
+  assert.ok(spreadsheetRows.every((row) => row.raw.receivingVolumes != null));
+  assert.ok(chatRows.every((row) => row.raw.receivingVolumeSource === "chat"));
+  assert.equal(spreadsheetRows.reduce((sum, row) => sum + row.raw.receivingVolumes, 0), 7098);
+  assert.equal(chatRows.reduce((sum, row) => sum + (row.raw.receivingVolumes || 0), 0), 34415);
+});
+
 spec("aplica as metas operacionais aprovadas sem faixa de tolerância inventada", () => {
   const expected = {
     "pec-omni": [0.99, "bad"], medallia: [0.93, "good"],
@@ -52,6 +68,8 @@ spec("aplica as metas operacionais aprovadas sem faixa de tolerância inventada"
     assert.ok(Math.abs(data.indicators[id].current.target - target) < 1e-9, `${id}: meta incorreta`);
     assert.equal(data.indicators[id].current.status, status, `${id}: status incorreto`);
   }
+  assert.equal(data.indicators.medallia.current.value, 0.953);
+  assert.equal(data.indicators.medallia.current.status, "good", "o status deve acompanhar o resultado geral exibido no ciclo sem respostas");
 });
 
 spec("contabiliza Retirada como pedidos e Trilogo como chamados", () => {
@@ -110,6 +128,19 @@ spec("expõe o código ao lado de todas as lojas", () => {
   for (const indicator of Object.values(data.indicators)) {
     assert.ok(indicator.ranking.every((row) => /^\d{5}$/.test(row.storeCode)), `${indicator.id}: código ausente`);
   }
+});
+
+spec("usa o código atual de Caratinga e mantém o código antigo como alias de leitura", () => {
+  const caratinga = data.stores.find((row) => row.store === "Caratinga");
+  assert.equal(caratinga.storeCode, "25195");
+  for (const indicator of Object.values(data.indicators)) {
+    const rows = indicator.records.filter((row) => row.store === "Caratinga");
+    assert.ok(rows.every((row) => row.storeCode === "25195"), `${indicator.id}: código antigo ainda exposto`);
+    const rankingRow = indicator.ranking.find((row) => row.store === "Caratinga");
+    assert.equal(rankingRow.storeCode, "25195", `${indicator.id}: código divergente no ranking`);
+  }
+  const orderSummary = data.orders?.stores?.find((row) => row.store === "Caratinga");
+  if (orderSummary) assert.equal(orderSummary.storeCode, "25195");
 });
 
 spec("mapeia os 17 ciclos para os intervalos oficiais de 2026", () => {

@@ -1,18 +1,28 @@
+import { NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
-import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-const snapshotPath = path.join(process.cwd(), "data", "dashboard-snapshot.json");
-const ordersPath = path.join(process.cwd(), "data", "pedidos-cumulativos.json");
+function dataDirectory() {
+  return process.env.ACCESS_DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || path.join(process.cwd(), "data");
+}
 
 function readSnapshot() {
+  const storedSnapshot = path.join(dataDirectory(), "dashboard-snapshot.json");
+  const bundledSnapshot = path.join(process.cwd(), "data", "dashboard-snapshot.json");
+  const snapshotPath = fs.existsSync(storedSnapshot) ? storedSnapshot : bundledSnapshot;
+  const ordersPath = path.join(dataDirectory(), "pedidos-cumulativos.json");
   if (!fs.existsSync(snapshotPath)) throw new Error("Snapshot de dados não encontrado no servidor.");
   const snapshot = JSON.parse(fs.readFileSync(snapshotPath, "utf8"));
   if (fs.existsSync(ordersPath)) {
     const orders = JSON.parse(fs.readFileSync(ordersPath, "utf8"));
-    snapshot.orders = orders ? (({ records, ...summary }: Record<string, unknown>) => summary)(orders) : orders;
+    if (orders) {
+      const summary = { ...orders };
+      delete summary.records;
+      snapshot.orders = summary;
+    } else snapshot.orders = orders;
   }
   return snapshot;
 }

@@ -13,7 +13,11 @@ import cyclePeriodsSource from "../config/cycles.json";
 import { AccessUser, authRequest } from "./auth-client";
 import { AuthScreen, PasswordChangeScreen, CadastroView } from "./access-components";
 
-const API = process.env.NEXT_PUBLIC_OPERATIONS_API_URL || (typeof window !== "undefined" && ["localhost", "127.0.0.1"].includes(window.location.hostname) ? "http://127.0.0.1:8788" : "");
+// O serviço auxiliar só existe no ambiente local. Fora do computador de
+// desenvolvimento, as atualizações devem usar as rotas same-origin do app.
+const API = typeof window !== "undefined" && ["localhost", "127.0.0.1"].includes(window.location.hostname)
+  ? process.env.NEXT_PUBLIC_OPERATIONS_API_URL || "http://127.0.0.1:8788"
+  : "";
 const STATUS = {
   good: { icon: "✓", label: "Dentro da meta", className: "good" },
   warning: { icon: "▲", label: "Atenção", className: "warning" },
@@ -680,6 +684,7 @@ export default function Home() {
   const [signingOut, setSigningOut] = useState(false);
   const [overviewRotation, setOverviewRotation] = useState(0);
   const [rotationPulse, setRotationPulse] = useState(false);
+  const refreshWorkbookInput = useRef<HTMLInputElement>(null);
   const lastOverviewInteraction = useRef(Date.now());
 
   useEffect(() => {
@@ -751,6 +756,29 @@ export default function Home() {
       setError(caught instanceof Error ? caught.message : "Falha ao carregar a API local.");
     } finally { setRefreshing(false); }
   }, []);
+
+  const uploadWorkbook = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setRefreshing(true); setError("");
+    try {
+      const form = new FormData();
+      form.set("workbook", file);
+      const upload = await fetch("/api/refresh", { method: "POST", body: form, cache: "no-store" });
+      const uploadBody = await upload.json().catch(() => ({})) as { error?: string };
+      if (!upload.ok) throw new Error(uploadBody.error || "Não foi possível atualizar a planilha.");
+      const response = await fetch("/api/dashboard", { cache: "no-store" });
+      const body = await response.json() as DashboardData & { error?: string };
+      if (!response.ok) throw new Error(body.error || "Planilha atualizada, mas não foi possível recarregar os indicadores.");
+      setData(body);
+      setRecurrenceRecords([]);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Falha ao enviar a planilha atualizada.");
+    } finally {
+      setRefreshing(false);
+      event.target.value = "";
+    }
+  };
 
   useEffect(() => {
     // A leitura inicial sincroniza a interface com a API local do Excel.
@@ -861,7 +889,7 @@ export default function Home() {
         <header className="topbar">
           <button className="menu-button" onClick={() => setMenuOpen(true)}><Menu /></button>
           <div><p>Dashboard de Operações</p><span>Última atualização: {shortDate.format(new Date(data.source.modifiedAt))}</span></div><img className="topbar-logo" src="/dashboard-logo.png" alt="Sfera Operações" />
-          <div className="topbar-actions"><button className="refresh" onClick={() => load(true)} disabled={refreshing}><RefreshCw className={refreshing ? "spin" : ""} size={17} />Atualizar dados</button><button className="refresh logout-button" onClick={() => void logout()} disabled={signingOut}>{signingOut ? "Saindo…" : "Sair"}</button></div>
+          <div className="topbar-actions">{!API && currentUser.accountType === "admin" && <input ref={refreshWorkbookInput} type="file" accept=".xlsx,.xls,.xlsm" hidden onChange={uploadWorkbook} />}<button className="refresh" onClick={() => API ? void load(true) : currentUser.accountType === "admin" ? refreshWorkbookInput.current?.click() : void load(false)} disabled={refreshing} title={!API && currentUser.accountType === "admin" ? "Selecione a planilha operacional atualizada" : undefined}><RefreshCw className={refreshing ? "spin" : ""} size={17} />{refreshing ? "Atualizando…" : !API && currentUser.accountType === "admin" ? "Enviar planilha" : "Atualizar dados"}</button><button className="refresh logout-button" onClick={() => void logout()} disabled={signingOut}>{signingOut ? "Saindo…" : "Sair"}</button></div>
         </header>
 
         <Filters data={data} store={store} setStore={setStore} cycle={cycle} setCycle={setCycle} startDate={startDate} setStartDate={setStartDate} endDate={endDate} setEndDate={setEndDate} indicator={indicatorFilter} setIndicator={setIndicatorFilter} status={statusFilter} setStatus={setStatusFilter} />

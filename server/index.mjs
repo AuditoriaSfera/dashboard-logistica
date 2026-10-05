@@ -71,6 +71,21 @@ function usableOrderTotal(snapshot) {
   return (snapshot?.stores || []).reduce((sum, item) => sum + Number(item.total || 0), 0);
 }
 
+function canonicalizeCaratingaCode(snapshot) {
+  if (!snapshot) return snapshot;
+  const legacyCodes = new Set(["23433", "23443"]);
+  const canonicalize = (item) => {
+    if (!legacyCodes.has(String(item?.storeCode))) return item;
+    return { ...item, storeCode: "25195", store: "Caratinga" };
+  };
+  return {
+    ...snapshot,
+    stores: (snapshot.stores || []).map(canonicalize),
+    daily: (snapshot.daily || []).map(canonicalize),
+    records: (snapshot.records || []).map(canonicalize),
+  };
+}
+
 function loadPersistedOrders(cumulativeFile, currentOrders) {
   if (!fs.existsSync(cumulativeFile)) return currentOrders;
   try {
@@ -88,10 +103,10 @@ function loadPersistedOrders(cumulativeFile, currentOrders) {
     if (fs.existsSync(backupFile)) {
       const backupOrders = JSON.parse(fs.readFileSync(backupFile, "utf8"));
       if (usableOrderTotal(savedOrders) < usableOrderTotal(backupOrders)) {
-        return mergeOrderSummaries(backupOrders, currentOrders);
+        return canonicalizeCaratingaCode(mergeOrderSummaries(backupOrders, currentOrders));
       }
     }
-    return savedOrders;
+    return canonicalizeCaratingaCode(savedOrders);
   } catch {
     return currentOrders;
   }

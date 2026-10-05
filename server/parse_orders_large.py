@@ -16,7 +16,7 @@ def num(v):
 canonical = {
     '19826':'Partage','20740':'Madureira','21044':'Alcantara','21469':'Juiz de Fora',
     '21470':'Benfica','21483':'Tres Rios','22552':'Raul Soares','22554':'Alem Paraiba',
-    '22555':'Manhuacu','22588':'Leopoldina','23318':'Santos Dumont','23433':'Caratinga',
+    '22555':'Manhuacu','22588':'Leopoldina','23318':'Santos Dumont','25195':'Caratinga',
     '23441':'Carangola','24064':'Aimores'
 }
 roles = {'bronze','cobre','diamante','diamante gb','esmeralda gb','ouro','platina','prata','rubi','revendedor'}
@@ -78,6 +78,7 @@ def parse(path):
         source = str(row[c_source] or '')
         m = re.search(r'\b(\d{4,6})\b', source)
         code = m.group(1) if m else None
+        if code in {'23433', '23443'}: code = '25195'
         if code not in canonical: continue
         day = str(row[c_date] or '')
         dm = re.search(r'(\d{2}/\d{2}/\d{4})', day)

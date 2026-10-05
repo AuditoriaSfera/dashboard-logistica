@@ -16,6 +16,9 @@ export const normalizeText = (value) => String(value ?? "")
   .normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
   .replace(/[^a-z0-9]+/g, " ").trim();
 
+const STORE_CODE_ALIASES = new Map([["23433", "25195"], ["23443", "25195"]]);
+const canonicalStoreCode = (code) => STORE_CODE_ALIASES.get(String(code ?? "")) || String(code ?? "");
+
 const number = (value) => {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value !== "string") return null;
@@ -51,9 +54,17 @@ const storeParts = (value, explicitCode) => {
   };
 };
 
-const rowsOf = (sheet) => XLSX.utils.sheet_to_json(sheet, {
-  header: 1, defval: null, raw: true, blankrows: false,
+const rowsOf = (sheet, { blankrows = false } = {}) => XLSX.utils.sheet_to_json(sheet, {
+  header: 1, defval: null, raw: true, blankrows,
 });
+
+const volumeNumber = (value) => {
+  const direct = number(value);
+  if (direct != null) return Math.round(direct);
+  if (typeof value !== "string") return null;
+  const match = value.match(/\d+(?:[.,]\d+)?/);
+  return match ? Math.round(number(match[0])) : null;
+};
 
 const findHeader = (rows, terms, limit = 35) => {
   let winner = { index: 0, score: -1 };
@@ -210,8 +221,9 @@ function parseRecebimento(rows, indicator) {
     invoice: findColumn(headers, ["numero da nota fiscal", "nota fiscal"]), volumes: findColumn(headers, ["quantidade de volumes", "volumes"]),
   };
   const chatVolumes = parseReceivingChatVolumes();
-  const parsed = rows.slice(h + 1).flatMap((row) => {
+  const parsed = rows.slice(h + 1).flatMap((row, rowOffset) => {
     if (!row[c.store]) return [];
+    const sheetRow = h + rowOffset + 2;
     const store = storeParts(row[c.store], row[c.code]);
     const start = excelDate(row[c.received]);
     const end = excelDate(row[c.entered]);
@@ -219,8 +231,13 @@ function parseRecebimento(rows, indicator) {
     if (days == null && start && end) days = Math.max(0, Math.round((new Date(end) - new Date(start)) / 86400000));
     const statusSource = String(row[c.status] ?? "");
     const invoiceKey = String(row[c.invoice] ?? "").replace(/\D/g, "") || null;
-    const spreadsheetVolumes = c.volumes >= 0 ? number(row[c.volumes]) : null;
-    const receivingVolumes = invoiceKey ? (chatVolumes.get(invoiceKey) ?? spreadsheetVolumes) : spreadsheetVolumes;
+    const spreadsheetVolumes = c.volumes >= 0 ? volumeNumber(row[c.volumes]) : null;
+    // A partir da linha 743, a coluna F da planilha passa a ser a fonte
+    // oficial de volumes. Antes dela, preservamos o histórico informado no chat.
+    const useSpreadsheetVolumes = sheetRow >= 743;
+    const receivingVolumes = useSpreadsheetVolumes
+      ? spreadsheetVolumes
+      : invoiceKey ? (chatVolumes.get(invoiceKey) ?? spreadsheetVolumes) : spreadsheetVolumes;
     const within = statusSource ? normalizeText(statusSource).includes("dentro") : days == null ? null : days <= 2;
     return [record(indicator, {
       storeCode: store.code, store: store.name, cycle: number(row[c.cycle]),
@@ -230,7 +247,11 @@ function parseRecebimento(rows, indicator) {
       date: start, periodStart: start, periodEnd: end, value: within == null ? null : within ? 1 : 0,
       target: 1, numerator: within ? 1 : 0, denominator: 1,
       statusSource: statusSource || null, notes: row[c.notes] || null,
-      raw: { conferenceDays: days, slaDays: 2, invoice: invoiceKey, receivingVolumes },
+      raw: {
+        conferenceDays: days, slaDays: 2, invoice: invoiceKey, receivingVolumes,
+        receivingVolumeSource: useSpreadsheetVolumes ? "planilha" : "chat",
+        receivingSheetRow: sheetRow,
+      },
     })];
   });
   const seenInvoices = new Set();
@@ -560,7 +581,11 @@ function buildModel(records, source, qualityReport) {
         count: latest.length,
         status: "unknown",
       }
-      : { ...aggregate(latest, indicator), value: latestGeneral ?? aggregate(latest, indicator).value };
+      : (() => {
+        const result = aggregate(latest, indicator);
+        const value = latestGeneral ?? result.value;
+        return { ...result, value, status: statusFor(value, result.target, indicator.direction, latestGeneral == null ? latest.find((row) => row.statusSource)?.statusSource : null) };
+      })();
     const periods = [...new Set(all.map((item) => item.cycle ?? item.date ?? item.periodEnd).filter(Boolean))]
       .sort((a, b) => typeof a === "number" && typeof b === "number" ? a - b : String(a).localeCompare(String(b)));
     byIndicator[indicator.id] = {
@@ -599,7 +624,7 @@ export function parseWorkbook(filePath) {
     const resolved = resolveSheet(workbook, indicator);
     if (!resolved) continue;
     resolvedSheets[indicator.id] = resolved.name;
-    const rows = rowsOf(workbook.Sheets[resolved.name]);
+    const rows = rowsOf(workbook.Sheets[resolved.name], { blankrows: indicator.id === "recebimento" });
     const parsed = indicator.id === "medallia" ? parseMedallia(rows, indicator)
       : indicator.id === "recebimento" ? parseRecebimento(rows, indicator)
         : indicator.id === "retirada" ? parseRetirada(rows, indicator)
@@ -614,7 +639,7 @@ export function parseWorkbook(filePath) {
     ["19826", "Partage"], ["20740", "Madureira"], ["21044", "Alcântara"],
     ["21469", "Juiz de Fora"], ["21740", "Benfica"], ["21483", "Três Rios"],
     ["22552", "Raul Soares"], ["22554", "Além Paraíba"], ["22555", "Manhuaçu"],
-    ["22588", "Leopoldina"], ["23318", "Santos Dumont"], ["23433", "Caratinga"],
+    ["22588", "Leopoldina"], ["23318", "Santos Dumont"], ["25195", "Caratinga"],
     ["23441", "Carangola"], ["24064", "Aimorés"],
   ]);
   const codeToName = new Map(canonicalStores);
@@ -627,6 +652,7 @@ export function parseWorkbook(filePath) {
   });
   for (const [code, name] of canonicalStores) nameToCode.set(normalizeText(name), code);
   records.forEach((item) => {
+    item.storeCode = canonicalStoreCode(item.storeCode);
     const normalizedStore = normalizeText(item.store);
     if (String(item.storeCode) === "23554" || normalizedStore === "alem paraiba") {
       item.raw.dataQualityCorrection = "Código/nome normalizado para 22554 - Além Paraíba";
@@ -671,12 +697,13 @@ function parseOrdersPivotSummary(filePath) {
   const itemTotals = new Map([
     ["19826", 597837], ["20740", 648201], ["21044", 604254], ["21469", 829231], ["21470", 90756],
     ["21483", 200582], ["22552", 74986], ["22554", 56573], ["22555", 414028], ["22588", 50048],
-    ["23318", 57281], ["23433", 223498], ["23441", 125831], ["24064", 42335],
+    ["23318", 57281], ["25195", 223498], ["23441", 125831], ["24064", 42335],
   ]);
   const canonical = new Map([
     ["19826", "Partage"], ["20740", "Madureira"], ["21044", "Alcântara"], ["21469", "Juiz de Fora"],
     ["21470", "Captação Juiz de Fora"], ["21483", "Três Rios"], ["22552", "Raul Soares"], ["22554", "Além Paraíba"],
-    ["22555", "Manhuaçu"], ["22588", "Leopoldina"], ["23318", "Santos Dumont"], ["23433", "Caratinga"],
+    ["22555", "Manhuaçu"], ["22588", "Leopoldina"], ["23318", "Santos Dumont"], ["25195", "Caratinga"],
+    ["23433", "Caratinga"],
     ["23441", "Carangola"], ["24064", "Aimorés"],
   ]);
   // [entrega, retirada] por motivo. Esta base reconcilia com os 35.247
@@ -693,7 +720,7 @@ function parseOrdersPivotSummary(filePath) {
     ["22555", { usuario: [868, 384], analisePagamento: [81, 7], antifraude: [13, 0], inatividade: [20, 7], estoque: [12, 0], prazoPendencia: [294, 25], recusaExterna: [2, 0] }],
     ["22588", { usuario: [0, 285], analisePagamento: [0, 3], inatividade: [0, 2], prazoPendencia: [0, 5] }],
     ["23318", { usuario: [0, 526], analisePagamento: [0, 2], inatividade: [0, 5], prazoPendencia: [0, 6] }],
-    ["23433", { usuario: [633, 766], analisePagamento: [38, 1], antifraude: [6, 0], inatividade: [9, 5], inconsistencia: [4, 0], prazoPendencia: [115, 29], recusaExterna: [2, 2] }],
+    ["25195", { usuario: [633, 766], analisePagamento: [38, 1], antifraude: [6, 0], inatividade: [9, 5], inconsistencia: [4, 0], prazoPendencia: [115, 29], recusaExterna: [2, 2] }],
     ["23441", { usuario: [796, 687], analisePagamento: [17, 3], inatividade: [2, 5], inconsistencia: [6, 0], prazoPendencia: [199, 13], recusaExterna: [2, 0] }],
     ["24064", { usuario: [230, 695], analisePagamento: [3, 1], inatividade: [0, 6], prazoPendencia: [32, 32] }],
   ]);
@@ -709,7 +736,7 @@ function parseOrdersPivotSummary(filePath) {
     const label = String(cells[0] || "").trim();
     const storeMatch = label.match(/^(\d{5})\s+-/);
     if (storeMatch) {
-      const code = storeMatch[1];
+      const code = canonicalStoreCode(storeMatch[1]);
       current = { store: canonical.get(code) || label.replace(/^\d{5}\s+-\s*/, ""), storeCode: code,
         total: 0, retirada: 0, entrega: 0, revendedor: 0, omni: 0, revendedorCategorias: {}, cancelamentoMotivos: cancellationReasons.get(code) || {}, cancelamentoFiscal: fiscalByStore.get(code) || {},
         retiradaCancelados: 0, entregaCancelados: 0, itens: itemTotals.get(code) ?? null,
@@ -767,7 +794,7 @@ function parseCancellationFiscalSummary(filePath) {
     const label = String(cells[0] || "").trim();
     const storeMatch = label.match(/^(\d{5})\s+-/);
     if (storeMatch) {
-      current = { code: storeMatch[1], values: Object.fromEntries(situations.map((key) => [key, [0, 0]])) };
+      current = { code: canonicalStoreCode(storeMatch[1]), values: Object.fromEntries(situations.map((key) => [key, [0, 0]])) };
       result.set(current.code, current.values);
       continue;
     }
@@ -802,7 +829,7 @@ export function parseOrdersWorkbook(filePath) {
   const canonical = new Map([
     ["19826", "Partage"], ["20740", "Madureira"], ["21044", "Alcântara"], ["21469", "Juiz de Fora"],
     ["21470", "Benfica"], ["21483", "Três Rios"], ["22552", "Raul Soares"], ["22554", "Além Paraíba"],
-    ["22555", "Manhuaçu"], ["22588", "Leopoldina"], ["23318", "Santos Dumont"], ["23433", "Caratinga"],
+    ["22555", "Manhuaçu"], ["22588", "Leopoldina"], ["23318", "Santos Dumont"], ["25195", "Caratinga"],
     ["23441", "Carangola"], ["24064", "Aimorés"],
   ]);
   const buckets = new Map();
@@ -816,7 +843,8 @@ export function parseOrdersWorkbook(filePath) {
   const numeric = (value) => Number(String(value ?? "").replace(/\./g, "").replace(",", ".")) || 0;
   for (const row of rows) {
     const source = String(row["CanalDistribuicao"] || "");
-    const code = source.match(/\b(\d{4,6})\b/)?.[1] || null;
+    const rawCode = source.match(/\b(\d{4,6})\b/)?.[1] || null;
+    const code = rawCode ? canonicalStoreCode(rawCode) : null;
     if (!code || !canonical.has(code)) continue;
     const store = canonical.get(code);
     const day = parseDate(row["Data Captação"]);
