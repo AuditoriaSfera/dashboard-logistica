@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
+import { databaseConfigured, getSql, loadDashboardFromDatabase } from "../../../server/db.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,8 +28,22 @@ function readSnapshot() {
   return snapshot;
 }
 
+// Banco (Supabase) primeiro: sobrevive a deploys. Sem banco, vazio ou indisponível, usa os arquivos.
+async function readSnapshotPreferringDatabase() {
+  if (databaseConfigured()) {
+    try {
+      const sql = getSql();
+      const fromDatabase = sql ? await loadDashboardFromDatabase(sql) : null;
+      if (fromDatabase) return fromDatabase;
+    } catch (error) {
+      console.error("[dados] Banco indisponível, usando arquivos:", (error as { code?: string })?.code || (error as Error)?.message);
+    }
+  }
+  return readSnapshot();
+}
+
 export async function GET() {
-  try { return NextResponse.json(readSnapshot()); }
+  try { return NextResponse.json(await readSnapshotPreferringDatabase()); }
   catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Falha ao carregar os dados." }, { status: 503 }); }
 }
 

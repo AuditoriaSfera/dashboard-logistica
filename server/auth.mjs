@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
 import { setTimeout as pause } from "node:timers/promises";
+import { getSql, loadAccessStore, saveAccessStore, withAccessTransaction } from "./db.mjs";
 
 export const TEMP_PASSWORD = "Sfera@2026";
 export const SESSION_COOKIE = "sfera_session";
@@ -163,11 +164,14 @@ function isAdmin(user) { return approved(user) && user.accountType === "admin"; 
 export function createAuthHandlers(options = {}) {
   const environment = options.environment || process.env;
   const now = options.now || Date.now;
+  // Com DATABASE_URL (Supabase) usuários e sessões ficam no banco e sobrevivem a deploys; arquivos só sem banco.
+  // ACCESS_STORAGE=file força o armazenamento em arquivo mesmo com DATABASE_URL definida.
+  const useDatabase = Boolean(options.sql || (!options.dataDir && !options.ephemeralDataDir && environment.DATABASE_URL && environment.ACCESS_STORAGE !== "file"));
   const explicitDataDir = options.dataDir || environment.ACCESS_DATA_DIR || environment.RAILWAY_VOLUME_MOUNT_PATH;
   const railway = Boolean(environment.RAILWAY_PROJECT_ID || environment.RAILWAY_ENVIRONMENT_ID || environment.RAILWAY_ENVIRONMENT || environment.RAILWAY_SERVICE_ID);
   // Sem volume no Railway o serviço continua no ar em modo temporário: a base de usuários fica no disco
   // do container e volta ao administrador inicial a cada deploy. ACCESS_REQUIRE_VOLUME=true restaura o bloqueio.
-  const ephemeral = railway && !explicitDataDir && environment.ACCESS_REQUIRE_VOLUME !== "true";
+  const ephemeral = !useDatabase && railway && !explicitDataDir && environment.ACCESS_REQUIRE_VOLUME !== "true";
   const dataDir = path.resolve(explicitDataDir || options.ephemeralDataDir || path.join(process.cwd(), "data"));
   const storePath = path.join(dataDir, "access-users.json");
   // Explicit test directories never fall back to the real working directory.
@@ -200,7 +204,34 @@ export function createAuthHandlers(options = {}) {
     }
   }
 
+  function initialStore() {
+    return {
+      version: 2,
+      users: [{ id: "admin-inicial", name: "Administrador Sfera", email: "admin@sfera.local", accountType: "admin", stores: [], passwordHash: passwordHash(TEMP_PASSWORD), mustChangePassword: true, status: "approved", active: true }],
+      sessions: [], loginAttempts: {}, resetRequests: [],
+    };
+  }
+
+  async function withDatabaseStore(operation) {
+    const sql = options.sql || getSql(environment);
+    return withAccessTransaction(sql, async (tx) => {
+      let store = await loadAccessStore(tx);
+      // Banco vazio = instalação nova. Com a tabela já povoada nunca recriamos o administrador.
+      let dirty = false;
+      if (!store.users.length) { store = initialStore(); dirty = true; }
+      validateStore(store);
+      const context = { store, dirty };
+      let value;
+      let thrown;
+      try { value = operation(context); } catch (error) { thrown = error; }
+      // O estado (ex.: contador de tentativas de login) é gravado mesmo quando a operação falha.
+      if (context.dirty) await saveAccessStore(tx, store);
+      return { value, thrown };
+    });
+  }
+
   async function withStore(operation) {
+    if (useDatabase) return withDatabaseStore(operation);
     if (railway && !explicitDataDir && !ephemeral) throw new AuthError(503, "Configure um volume persistente para os usuários (RAILWAY_VOLUME_MOUNT_PATH ou ACCESS_DATA_DIR) antes de liberar o acesso.");
     if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
     const lock = await acquireLock();

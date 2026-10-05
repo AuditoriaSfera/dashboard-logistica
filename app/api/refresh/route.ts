@@ -4,6 +4,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { NextResponse } from "next/server";
 import { GET as authGet } from "../auth/route";
+import { databaseConfigured, getSql, loadDashboardFromDatabase, saveSnapshotToDatabase } from "../../../server/db.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -64,7 +65,15 @@ export async function POST(request: Request) {
     const ordersPath = path.join(directory, "pedidos-cumulativos.json");
     const stat = fs.statSync(temporaryWorkbook);
     snapshot.source = { ...snapshot.source, path: safeName, fileName: safeName, modifiedAt: stat.mtime.toISOString(), size: stat.size, uploadedAt: new Date().toISOString() };
-    if (fs.existsSync(ordersPath)) {
+    // Com banco, o resumo de pedidos já salvo lá é a fonte mais atual (os arquivos do container podem ser antigos).
+    let databaseOrders: unknown = null;
+    if (databaseConfigured()) {
+      try { databaseOrders = (await loadDashboardFromDatabase(getSql()))?.orders ?? null; }
+      catch (error) { console.error("[refresh] Banco indisponível ao ler pedidos:", (error as { code?: string })?.code || (error as Error)?.message); }
+    }
+    if (databaseOrders) {
+      snapshot.orders = databaseOrders;
+    } else if (fs.existsSync(ordersPath)) {
       const orders = JSON.parse(fs.readFileSync(ordersPath, "utf8"));
       if (orders) {
         const summary = { ...orders };
@@ -82,7 +91,17 @@ export async function POST(request: Request) {
     fs.renameSync(temporaryWorkbook, workbookPath);
     temporaryWorkbook = null;
     writeJsonAtomically(snapshotPath, snapshot);
-    return NextResponse.json({ ok: true, fileName: safeName, modifiedAt: snapshot.source.modifiedAt });
+    // Persistência definitiva: o disco do container é apagado a cada deploy, o banco não.
+    let persisted = false;
+    if (databaseConfigured()) {
+      try {
+        await saveSnapshotToDatabase(getSql(), { snapshot, orders: snapshot.orders });
+        persisted = true;
+      } catch (error) {
+        console.error("[refresh] Falha ao gravar no banco:", (error as { code?: string })?.code || (error as Error)?.message);
+      }
+    }
+    return NextResponse.json({ ok: true, fileName: safeName, modifiedAt: snapshot.source.modifiedAt, persisted });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Falha ao atualizar a planilha operacional.";
     const status = /administrador|Entre novamente/.test(message) ? 403 : 400;

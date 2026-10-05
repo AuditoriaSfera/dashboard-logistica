@@ -71,23 +71,53 @@ curl -s "https://api.github.com/repos/AuditoriaSfera/dashboard-logistica/deploym
 - **ESLint**: existem 8 erros antigos de regras do React 19 (`set-state-in-effect` etc.). Não bloqueiam o deploy;
   não os "conserte" de passagem em um commit de outra natureza.
 
+## Banco de dados (Supabase) — persistência definitiva
+
+O disco do Railway é apagado a cada deploy, então **tudo que precisa durar fica no Supabase** (Postgres).
+
+- Projeto Supabase: `dashboard-logistica` (org AuditoriaSfera, região `sa-east-1`, ref `uutkextcrllwypmdkcgb`).
+- O sistema usa o banco **somente se a variável `DATABASE_URL` existir** (no Railway ou no seu `.env`). Sem ela
+  tudo cai nos arquivos de `data/`, como antes — por isso o código funciona nos dois modos. Remover `DATABASE_URL`
+  do Railway é o "botão de emergência" para voltar aos arquivos.
+- `DATABASE_URL` = URL do **transaction pooler**, porta **6543**, usuário `dashboard_app.<ref>` (papel de privilégio
+  mínimo, não o `postgres`). Formato:
+  `postgresql://dashboard_app.uutkextcrllwypmdkcgb:<SENHA>@aws-0-sa-east-1.pooler.supabase.com:6543/postgres`.
+  **Nunca** commite a senha/URL (repositório público). Não use o host direto `db.<ref>.supabase.co` (IPv6; o Railway não alcança).
+- Tabelas (`db/migrations/001_initial_schema.sql`, papel em `002_app_role.sql`): `access_users`, `access_sessions`,
+  `access_login_attempts`, `access_meta` (usuários/sessões), `dashboard_snapshots` (chaves `dashboard` e `orders`),
+  `order_records` (pedidos detalhados), `order_imports` (histórico de importações). RLS ligada; só o papel
+  `dashboard_app` acessa. Mudanças de esquema: novo arquivo `db/migrations/00N_*.sql` **e** aplicar no Supabase
+  (conector Supabase/`apply_migration` ou SQL Editor).
+- Código: `server/db.mjs` (todas as consultas). Leitura: `app/api/dashboard` e `app/api/orders/records` leem do banco
+  primeiro e usam arquivos como fallback. Escrita: `app/api/refresh` (upload online) e `server/index.mjs` (Express local)
+  gravam no banco depois de processar a planilha.
+- **Não troque o carregamento do driver** em `server/db.mjs` por `import postgres from "postgres"`: o empacotador do
+  vinext embute a variante Cloudflare e o servidor passa a falhar com `ERR_UNSUPPORTED_ESM_URL_SCHEME`
+  (já aconteceu). O driver é carregado com `createRequire` em tempo de execução. Sempre use `prepare: false` (pooler).
+- Comandos: `DATABASE_URL=... npm run db:check` (diagnóstico: conexão e contagem das tabelas) e
+  `DATABASE_URL=... npm run db:seed` (recarrega o banco a partir de `data/*.json`).
+- Nunca rode SQL destrutivo em produção (`delete`/`truncate` em `access_users`, `order_records`) sem o usuário pedir.
+
 ## Dados online (`data/`)
 
-- `.gitignore` ignora `/data/*`, **exceto** `.gitkeep`; os dois JSON abaixo estão versionados à força e são o que o site
-  online lê (`app/api/dashboard`, `app/api/orders/records`):
+- Com `DATABASE_URL`, o site lê os dados do **banco**; os JSON de `data/` viram só o fallback/semente.
+- `.gitignore` ignora `/data/*`, **exceto** `.gitkeep`; os dois JSON abaixo estão versionados à força:
   - `data/dashboard-snapshot.json` (~4,5 MB) e `data/pedidos-cumulativos.json` (~3,3 MB).
-- Para atualizar os dados online: gere os JSON localmente (servidor Express + planilha) e publique com
-  `git add -f data/dashboard-snapshot.json data/pedidos-cumulativos.json`.
+- Atualização de dados: pelo upload online (`/api/refresh`, grava no banco) ou localmente (Express + planilha, que
+  também grava no banco quando `DATABASE_URL` está definida). Não precisa mais commitar JSON para atualizar o site.
+  Se for atualizar o fallback versionado: `git add -f data/dashboard-snapshot.json data/pedidos-cumulativos.json`.
 - **Nunca** commite `data/access-users.json`, `data/auth-backups/`, `*.lock`, `.env*` nem planilhas `.xlsx/.csv`
   de pedidos (contêm hash de senhas / dados pessoais). O repositório é **público**.
-- O upload de planilha (`/api/orders/upload`) só existe no Express local; **não funciona no Railway**.
 
 ## Autenticação e usuários (`server/auth.mjs`)
 
-- Usuários ficam em `access-users.json`. Ordem de escolha do diretório: `ACCESS_DATA_DIR` →
+- **Com `DATABASE_URL`: usuários e sessões ficam no banco** e sobrevivem a deploys (modo normal). O administrador
+  inicial (`admin@sfera.local`, senha temporária `TEMP_PASSWORD`, troca obrigatória) só é criado se a tabela
+  `access_users` estiver vazia. `ACCESS_STORAGE=file` força arquivo mesmo com `DATABASE_URL`.
+- Sem `DATABASE_URL`, usuários ficam em `access-users.json`. Ordem de escolha do diretório: `ACCESS_DATA_DIR` →
   `RAILWAY_VOLUME_MOUNT_PATH` → (Railway sem volume) disco do container em **modo temporário**.
-- Hoje o Railway **não tem volume**: a cada deploy as contas são recriadas (só `admin@sfera.local` com a senha
-  temporária definida em `TEMP_PASSWORD`, troca obrigatória no 1º acesso). É esperado, não é bug.
+- Sem banco e sem volume, a cada deploy as contas são recriadas (só `admin@sfera.local` com a senha
+  temporária, troca obrigatória no 1º acesso). É esperado, não é bug.
 - **Não reintroduza** o bloqueio "Configure um volume persistente" como padrão: ele já deixou o site inteiro fora
   do ar (503 em `/api/auth`). Quem quiser o bloqueio rígido define `ACCESS_REQUIRE_VOLUME=true` no Railway.
 - Quando o dono do Railway criar um Volume, o sistema passa a usá-lo sozinho (sem mudança de código).
@@ -101,5 +131,7 @@ curl -s "https://api.github.com/repos/AuditoriaSfera/dashboard-logistica/deploym
 | Validar tudo | `npm run verify` |
 | Só tipos | `npx tsc --noEmit` |
 | Só testes | `npm test` |
+| Diagnóstico do banco | `DATABASE_URL=... npm run db:check` |
+| Recarregar banco a partir de `data/*.json` | `DATABASE_URL=... npm run db:seed` |
 | Rodar produção local simulando Railway | `RAILWAY_PROJECT_ID=x NODE_ENV=production npx vinext start -p 4010` |
 | Dev local completo | `INICIAR_DASHBOARD.cmd` (API 8788 + web 3000) |

@@ -3,6 +3,7 @@ import chokidar from "chokidar";
 import cors from "cors";
 import express from "express";
 import { GET as authGet, POST as authPost } from "./auth.mjs";
+import { databaseConfigured, getSql, logOrderImport, syncDashboardToDatabase } from "./db.mjs";
 import { findDefaultWorkbook, parseWorkbook } from "./parser.mjs";
 
 const PORT = Number(process.env.OPERATIONS_API_PORT || 8788);
@@ -41,12 +42,28 @@ app.post("/api/orders/upload", express.raw({ type: () => true, limit: "300mb" })
     }
     if (next.orders && !next.orders.error) fs.writeFileSync(new URL("../data/pedidos-cumulativos.json", import.meta.url), JSON.stringify(next.orders));
     fs.writeFileSync(new URL("../data/ultima-importacao-pedidos.json", import.meta.url), JSON.stringify({ importedAt: new Date().toISOString(), fileName: originalName }));
+    if (next.orders && !next.orders.error) {
+      await syncToDatabase(cache, "upload de pedidos");
+      if (databaseConfigured()) await logOrderImport(getSql(), { fileName: originalName, recordCount: next.orders.records?.length ?? null }).catch((error) => console.error("[banco] Falha ao registrar a importação:", error?.code || error?.message));
+    }
     if (next.orders?.error) return response.status(400).json({ error: next.orders.error });
     response.json({ ok: true, fileName: next.orders?.source?.fileName || "pedidos-importados.xlsx" });
   } catch (error) {
     response.status(400).json({ error: `Falha ao importar planilha de pedidos: ${error.message}` });
   }
 });
+
+// Espelha o resultado no Supabase (quando DATABASE_URL existe) para o site online não depender de commit de JSON.
+// Falha de banco nunca derruba a API local: só é registrada no console.
+async function syncToDatabase(snapshot, reason) {
+  if (!databaseConfigured() || !snapshot) return;
+  try {
+    const saved = await syncDashboardToDatabase(getSql(), snapshot);
+    console.log(`[banco] Supabase atualizado (${reason}); ${saved} registros de pedidos gravados.`);
+  } catch (error) {
+    console.error("[banco] Falha ao gravar no Supabase:", error?.code || error?.message);
+  }
+}
 
 function mergeOrderSummaries(previous, current) {
   const stores = new Map((previous.stores || []).map((item) => [item.storeCode, { ...item, revendedorCategorias: { ...(item.revendedorCategorias || {}) }, cancelamentoMotivos: { ...(item.cancelamentoMotivos || {}) }, cancelamentoFiscal: { ...(item.cancelamentoFiscal || {}) } }]));
@@ -143,6 +160,7 @@ async function refresh(reason = "manual", options = {}) {
     if (options.usePersistedOrders !== false) next.orders = loadPersistedOrders(cumulativeFile, next.orders);
     cache = { ...next, meta: { ...next.meta, refreshReason: reason, loadedAt: new Date().toISOString() } };
     lastError = null;
+    if (options.usePersistedOrders !== false) syncToDatabase(cache, reason);
     return cache;
   }).catch((error) => {
     lastError = { message: error.message, at: new Date().toISOString() };
