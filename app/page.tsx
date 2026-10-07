@@ -749,6 +749,10 @@ export default function Home() {
     try {
       const response = await fetch(`${API}/api/${manual ? "refresh" : "dashboard"}`, { method: manual ? "POST" : "GET", cache: "no-store" });
       const body = (await response.json()) as DashboardData & { error?: string };
+      if (manual && !API && response.status === 400 && body.error?.includes("planilha-base")) {
+        refreshWorkbookInput.current?.click();
+        return;
+      }
       if (!response.ok) throw new Error(body.error || "Não foi possível carregar os dados.");
       setData(body);
       setRecurrenceRecords([]);
@@ -889,7 +893,7 @@ export default function Home() {
         <header className="topbar">
           <button className="menu-button" onClick={() => setMenuOpen(true)}><Menu /></button>
           <div><p>Dashboard de Operações</p><span>Última atualização: {shortDate.format(new Date(data.source.modifiedAt))}</span></div><img className="topbar-logo" src="/dashboard-logo.png" alt="Sfera Operações" />
-          <div className="topbar-actions">{!API && currentUser.accountType === "admin" && <input ref={refreshWorkbookInput} type="file" accept=".xlsx,.xls,.xlsm" hidden onChange={uploadWorkbook} />}<button className="refresh" onClick={() => API ? void load(true) : currentUser.accountType === "admin" ? refreshWorkbookInput.current?.click() : void load(false)} disabled={refreshing} title={!API && currentUser.accountType === "admin" ? "Selecione a planilha operacional atualizada" : undefined}><RefreshCw className={refreshing ? "spin" : ""} size={17} />{refreshing ? "Atualizando…" : !API && currentUser.accountType === "admin" ? "Enviar planilha" : "Atualizar dados"}</button><button className="refresh logout-button" onClick={() => void logout()} disabled={signingOut}>{signingOut ? "Saindo…" : "Sair"}</button></div>
+          <div className="topbar-actions">{!API && currentUser.accountType === "admin" && <input ref={refreshWorkbookInput} type="file" accept=".xlsx,.xls,.xlsm" hidden onChange={uploadWorkbook} />}<button className="refresh" onClick={() => currentUser.accountType === "admin" ? void load(true) : void load(false)} disabled={refreshing} title={!API && currentUser.accountType === "admin" ? "Reler a planilha-base cadastrada; no primeiro uso, selecione-a uma vez" : undefined}><RefreshCw className={refreshing ? "spin" : ""} size={17} />{refreshing ? "Atualizando…" : "Atualizar dados"}</button><button className="refresh logout-button" onClick={() => void logout()} disabled={signingOut}>{signingOut ? "Saindo…" : "Sair"}</button></div>
         </header>
 
         <Filters data={data} store={store} setStore={setStore} cycle={cycle} setCycle={setCycle} startDate={startDate} setStartDate={setStartDate} endDate={endDate} setEndDate={setEndDate} indicator={indicatorFilter} setIndicator={setIndicatorFilter} status={statusFilter} setStatus={setStatusFilter} />
