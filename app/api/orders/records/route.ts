@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { NextResponse } from "next/server";
+import { authorize } from "../../../../server/auth.mjs";
 import { databaseConfigured, getSql, loadOrderRecordsFromDatabase } from "../../../../server/db.mjs";
 
 export const runtime = "nodejs";
@@ -11,7 +12,9 @@ function readFromFiles() {
   return { records: orders.records || [], source: orders.source || null, period: orders.period || null };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const access = await authorize(request);
+  if (access.error) return access.error;
   try {
     if (databaseConfigured()) {
       try {

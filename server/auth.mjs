@@ -389,6 +389,14 @@ export function createAuthHandlers(options = {}) {
   }
 
   return {
+    async authorize(request) {
+      try {
+        const user = await withStore(({ store }) => currentUser(store, request));
+        return { user: safeUser(user) };
+      } catch (error) {
+        return { error: failure(error) };
+      }
+    },
     async GET(request) {
       try {
         return await withStore(({ store }) => {
@@ -428,5 +436,6 @@ export function createAuthHandlers(options = {}) {
 }
 
 const handlers = createAuthHandlers();
+export const authorize = handlers.authorize;
 export const GET = handlers.GET;
 export const POST = handlers.POST;

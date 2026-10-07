@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { authorize } from "../../../server/auth.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { databaseConfigured, getSql, loadDashboardFromDatabase } from "../../../server/db.mjs";
@@ -42,11 +43,13 @@ async function readSnapshotPreferringDatabase() {
   return readSnapshot();
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const access = await authorize(request);
+  if (access.error) return access.error;
   try { return NextResponse.json(await readSnapshotPreferringDatabase()); }
   catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Falha ao carregar os dados." }, { status: 503 }); }
 }
 
-export async function POST() {
-  return GET();
+export async function POST(request: Request) {
+  return GET(request);
 }
