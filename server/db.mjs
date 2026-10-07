@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 
@@ -10,9 +11,9 @@ const loadPostgres = () => {
   return loaded.default ?? loaded;
 };
 
-// Conexão com o Supabase (Postgres). Só existe quando DATABASE_URL está definida; sem ela o sistema
+// Conexão com o Postgres (Railway). Só existe quando DATABASE_URL está definida; sem ela o sistema
 // continua usando arquivos locais (data/*.json), como antes.
-// Use a URL do *transaction pooler* (porta 6543): o Railway não alcança o host direto (IPv6).
+// No Railway use a referência ${{Postgres.DATABASE_URL}} (rede interna). O pooler do Supabase (porta 6543) também funciona.
 const TEXT_ARRAY = 1009;
 const SNAPSHOT_KEY = "dashboard";
 const ORDERS_KEY = "orders";
@@ -24,13 +25,22 @@ export function databaseConfigured(environment = process.env) {
   return Boolean(environment.DATABASE_URL);
 }
 
+// Rede interna do Railway (*.railway.internal) aceita SSL ou não, conforme a imagem do Postgres: "prefer" tenta
+// criptografar e cai para texto puro. Qualquer outro host exige SSL. DATABASE_SSL=disable|require força o modo.
+function sslMode(url, environment) {
+  if (environment.DATABASE_SSL === "disable") return false;
+  if (environment.DATABASE_SSL === "require") return "require";
+  try { if (new URL(url).hostname.endsWith(".railway.internal")) return "prefer"; } catch { /* URL inválida: o driver reclama */ }
+  return "require";
+}
+
 export function getSql(environment = process.env) {
   const url = environment.DATABASE_URL;
   if (!url) return null;
   if (cached?.url === url) return cached.sql;
   if (cached) cached.sql.end({ timeout: 1 }).catch(() => {});
   const sql = loadPostgres()(url, {
-    ssl: environment.DATABASE_SSL === "disable" ? false : "require",
+    ssl: sslMode(url, environment),
     prepare: false, // exigido pelo pooler em modo transaction
     max: 5,
     idle_timeout: 20,
@@ -48,9 +58,68 @@ export async function closeSql() {
   await sql.end({ timeout: 5 });
 }
 
+// ───────────── Migrações automáticas ─────────────
+// Todo arquivo db/migrations/NNN_*.sql roda uma única vez, em ordem, na primeira conexão (registro em
+// schema_migrations). Assim um Postgres vazio (ex.: o do Railway) fica pronto sozinho, sem ninguém rodar SQL.
+// Regras: o SQL deve ser idempotente e portável (sem nomes de papel do Supabase, sem prefixo de schema).
+// Scripts que dependem de segredos ou de papéis específicos ficam em db/manual/ e nunca rodam automaticamente.
+const MIGRATIONS_LOCK = 727002;
+const RETRY_AFTER_MS = 30_000;
+const schemaState = new Map(); // schema -> { promise, failedAt }
+
+function migrationFiles() {
+  const directory = path.join(process.cwd(), "db", "migrations");
+  return fs.readdirSync(directory).filter((name) => /^\d+_.+\.sql$/.test(name)).sort()
+    .map((name) => ({ name, sql: fs.readFileSync(path.join(directory, name), "utf8") }));
+}
+
+async function applyMigrations(sql, schema) {
+  const files = migrationFiles();
+  await sql.begin(async (tx) => {
+    await tx`select pg_advisory_xact_lock(${MIGRATIONS_LOCK})`;
+    await tx.unsafe(`set local search_path to "${schema}"`);
+    // "create table if not exists" já exige permissão de criação, mesmo com a tabela presente (papéis restritos falham).
+    const [{ present }] = await tx`select to_regclass('schema_migrations') is not null as present`;
+    if (!present) await tx.unsafe("create table schema_migrations (name text primary key, applied_at timestamptz not null default now())");
+    const applied = new Set((await tx`select name from schema_migrations`).map((row) => row.name));
+    if (!applied.size) {
+      // Banco criado antes deste executor (Supabase): o esquema inicial já existe, só registra.
+      const [{ exists }] = await tx`select to_regclass('access_users') is not null as exists`;
+      if (exists && files[0]) {
+        await tx`insert into schema_migrations (name) values (${files[0].name}) on conflict do nothing`;
+        applied.add(files[0].name);
+      }
+    }
+    for (const file of files) {
+      if (applied.has(file.name)) continue;
+      await tx.unsafe(file.sql);
+      await tx`insert into schema_migrations (name) values (${file.name})`;
+      console.log(`[banco] Migração aplicada: ${file.name}`);
+    }
+  });
+}
+
+/** Garante o esquema atualizado (uma vez por processo). Falhas são repetidas após 30 s, sem martelar o banco. */
+export function ensureSchema(sql, schema = "public") {
+  if (!/^[a-z_][a-z0-9_]*$/.test(schema)) throw new Error("Nome de schema inválido.");
+  const state = schemaState.get(schema);
+  if (state && !(state.failedAt && Date.now() - state.failedAt > RETRY_AFTER_MS)) return state.promise;
+  const entry = { promise: null, failedAt: 0 };
+  entry.promise = applyMigrations(sql, schema).catch((error) => {
+    entry.failedAt = Date.now();
+    console.error("[banco] Falha ao preparar o esquema:", error?.code || error?.message);
+    throw error;
+  });
+  schemaState.set(schema, entry);
+  return entry.promise;
+}
+
+export function resetSchemaStateForTests() { schemaState.clear(); }
+
 // A single canonical workbook lets the online refresh button reread the last
 // uploaded source without requiring the administrator to upload it again.
 export async function saveSourceWorkbook(sql, { fileName, bytes }) {
+  await ensureSchema(sql);
   await sql`
     insert into public.source_workbooks (key, file_name, content)
     values ('operations', ${fileName}, ${bytes})
@@ -58,6 +127,7 @@ export async function saveSourceWorkbook(sql, { fileName, bytes }) {
 }
 
 export async function loadSourceWorkbook(sql) {
+  await ensureSchema(sql);
   const [row] = await sql`select file_name, content from public.source_workbooks where key = 'operations'`;
   return row?.content ? { fileName: row.file_name, bytes: Buffer.from(row.content) } : null;
 }
@@ -132,6 +202,7 @@ export async function saveAccessStore(tx, store) {
  * confirmar a transação (contadores de tentativa) e só depois ser relançado.
  */
 export async function withAccessTransaction(sql, work) {
+  await ensureSchema(sql);
   const outcome = await sql.begin(async (tx) => {
     await tx`select pg_advisory_xact_lock(${ACCESS_LOCK})`;
     return work(tx);
@@ -145,6 +216,7 @@ export async function withAccessTransaction(sql, work) {
 const withoutRecords = (orders) => (orders ? (({ records, ...summary }) => summary)(orders) : orders);
 
 export async function saveSnapshotToDatabase(sql, { snapshot, orders }) {
+  await ensureSchema(sql);
   const { orders: _ignored, ...dashboard } = snapshot;
   const sourceFile = dashboard.source?.fileName ?? null;
   const modifiedAt = dashboard.source?.modifiedAt ?? null;
@@ -166,6 +238,7 @@ export async function saveSnapshotToDatabase(sql, { snapshot, orders }) {
 const recordKey = (record) => String(record.orderCode || `${record.storeCode || record.store || ""}|${record.date || ""}|${record.reseller || ""}|${record.value || 0}`);
 
 export async function saveOrderRecords(sql, records) {
+  await ensureSchema(sql);
   let saved = 0;
   for (let start = 0; start < records.length; start += BATCH) {
     const rows = records.slice(start, start + BATCH).map((record) => ({
@@ -195,6 +268,7 @@ export async function saveOrderRecords(sql, records) {
 }
 
 export async function logOrderImport(sql, { fileName, recordCount, importedBy = null, note = null }) {
+  await ensureSchema(sql);
   await sql`insert into public.order_imports (file_name, record_count, imported_by, note) values (${fileName}, ${recordCount ?? null}, ${importedBy}, ${note})`;
 }
 
@@ -207,6 +281,7 @@ export async function syncDashboardToDatabase(sql, snapshot) {
 
 /** Último snapshot salvo no banco, no mesmo formato de data/dashboard-snapshot.json (orders sem registros). */
 export async function loadDashboardFromDatabase(sql) {
+  await ensureSchema(sql);
   const rows = await sql`select key, data from public.dashboard_snapshots where key in (${SNAPSHOT_KEY}, ${ORDERS_KEY})`;
   const dashboard = rows.find((row) => row.key === SNAPSHOT_KEY)?.data;
   if (!dashboard) return null;
@@ -215,6 +290,7 @@ export async function loadDashboardFromDatabase(sql) {
 }
 
 export async function loadOrderRecordsFromDatabase(sql) {
+  await ensureSchema(sql);
   const [summary] = await sql`select data from public.dashboard_snapshots where key = ${ORDERS_KEY}`;
   const rows = await sql`
     select order_code, reseller, channel, role, city, store, store_code, cycle, value, order_date, canceled

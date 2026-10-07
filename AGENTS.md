@@ -71,32 +71,36 @@ curl -s "https://api.github.com/repos/AuditoriaSfera/dashboard-logistica/deploym
 - **ESLint**: existem 8 erros antigos de regras do React 19 (`set-state-in-effect` etc.). Não bloqueiam o deploy;
   não os "conserte" de passagem em um commit de outra natureza.
 
-## Banco de dados (Supabase) — persistência definitiva
+## Banco de dados (PostgreSQL do Railway) — persistência definitiva
 
-O disco do Railway é apagado a cada deploy, então **tudo que precisa durar fica no Supabase** (Postgres).
+O disco do Railway é apagado a cada deploy, então **tudo que precisa durar fica no Postgres** (serviço PostgreSQL
+criado no próprio projeto do Railway; os mesmos dados também funcionam em qualquer outro Postgres, ex.: Supabase).
 
-- Projeto Supabase: `dashboard-logistica` (org AuditoriaSfera, região `sa-east-1`, ref `uutkextcrllwypmdkcgb`).
-- O sistema usa o banco **somente se a variável `DATABASE_URL` existir** (no Railway ou no seu `.env`). Sem ela
-  tudo cai nos arquivos de `data/`, como antes — por isso o código funciona nos dois modos. Remover `DATABASE_URL`
-  do Railway é o "botão de emergência" para voltar aos arquivos.
-- `DATABASE_URL` = URL do **transaction pooler**, porta **6543**, usuário `dashboard_app.<ref>` (papel de privilégio
-  mínimo, não o `postgres`). Formato:
-  `postgresql://dashboard_app.uutkextcrllwypmdkcgb:<SENHA>@aws-0-sa-east-1.pooler.supabase.com:6543/postgres`.
-  **Nunca** commite a senha/URL (repositório público). Não use o host direto `db.<ref>.supabase.co` (IPv6; o Railway não alcança).
-- Tabelas (`db/migrations/001_initial_schema.sql`, papel em `002_app_role.sql`): `access_users`, `access_sessions`,
-  `access_login_attempts`, `access_meta` (usuários/sessões), `dashboard_snapshots` (chaves `dashboard` e `orders`),
-  `order_records` (pedidos detalhados), `order_imports` (histórico de importações). RLS ligada; só o papel
-  `dashboard_app` acessa. Mudanças de esquema: novo arquivo `db/migrations/00N_*.sql` **e** aplicar no Supabase
-  (conector Supabase/`apply_migration` ou SQL Editor).
-- Código: `server/db.mjs` (todas as consultas). Leitura: `app/api/dashboard` e `app/api/orders/records` leem do banco
-  primeiro e usam arquivos como fallback. Escrita: `app/api/refresh` (upload online) e `server/index.mjs` (Express local)
-  gravam no banco depois de processar a planilha.
+- O sistema usa o banco **somente se a variável `DATABASE_URL` existir**. No Railway ela é uma **referência** ao
+  serviço do banco (`${{Postgres.DATABASE_URL}}`, rede interna `*.railway.internal`) — ninguém precisa copiar senha.
+  Sem a variável tudo cai nos arquivos de `data/`, como antes. Remover `DATABASE_URL` é o "botão de emergência".
+- **Migrações automáticas**: todo `db/migrations/NNN_*.sql` roda uma única vez, em ordem, na primeira conexão
+  (`ensureSchema` em `server/db.mjs`, registro na tabela `schema_migrations`). Um Postgres vazio fica pronto sozinho.
+  Para mudar o esquema: **crie um novo arquivo** `db/migrations/00N_*.sql` (nunca edite um já publicado). O SQL precisa
+  ser idempotente e portável: sem prefixo de schema, sem nomes de papel do Supabase (veja `003_*.sql` como exemplo).
+  Scripts que dependem de segredo/papel específico ficam em `db/manual/` e nunca rodam sozinhos.
+- Tabelas: `access_users`, `access_sessions`, `access_login_attempts`, `access_meta` (usuários e sessões),
+  `dashboard_snapshots` (chaves `dashboard` e `orders`), `order_records` (pedidos detalhados), `order_imports`
+  (histórico), `source_workbooks` (planilha canônica do upload online), `schema_migrations`.
+- Código: `server/db.mjs` concentra todas as consultas. Leitura: `app/api/dashboard` e `app/api/orders/records` leem
+  do banco primeiro e usam arquivos como fallback. Escrita: `app/api/refresh` (upload online) e `server/index.mjs`
+  (Express local) gravam no banco depois de processar a planilha.
+- SSL: host `*.railway.internal` usa `prefer`; qualquer outro host exige SSL. `DATABASE_SSL=disable|require` força o modo.
 - **Não troque o carregamento do driver** em `server/db.mjs` por `import postgres from "postgres"`: o empacotador do
   vinext embute a variante Cloudflare e o servidor passa a falhar com `ERR_UNSUPPORTED_ESM_URL_SCHEME`
   (já aconteceu). O driver é carregado com `createRequire` em tempo de execução. Sempre use `prepare: false` (pooler).
 - Comandos: `DATABASE_URL=... npm run db:check` (diagnóstico: conexão e contagem das tabelas) e
-  `DATABASE_URL=... npm run db:seed` (recarrega o banco a partir de `data/*.json`).
-- Nunca rode SQL destrutivo em produção (`delete`/`truncate` em `access_users`, `order_records`) sem o usuário pedir.
+  `DATABASE_URL=... npm run db:seed` (recarrega o banco a partir de `data/*.json`). Para rodar de fora do Railway use
+  a URL **pública** do serviço (`DATABASE_PUBLIC_URL`), nunca a interna.
+- **Nunca** commite senha/URL de banco (repositório público). Nunca rode SQL destrutivo em produção
+  (`delete`/`truncate`/`drop`) sem o usuário pedir.
+- Um projeto Supabase (`dashboard-logistica`, ref `uutkextcrllwypmdkcgb`) foi usado nos testes e **não é o banco de
+  produção**; está parado e pode ser apagado.
 
 ## Dados online (`data/`)
 
