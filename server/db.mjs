@@ -48,6 +48,20 @@ export async function closeSql() {
   await sql.end({ timeout: 5 });
 }
 
+// A single canonical workbook lets the online refresh button reread the last
+// uploaded source without requiring the administrator to upload it again.
+export async function saveSourceWorkbook(sql, { fileName, bytes }) {
+  await sql`
+    insert into public.source_workbooks (key, file_name, content)
+    values ('operations', ${fileName}, ${bytes})
+    on conflict (key) do update set file_name = excluded.file_name, content = excluded.content, updated_at = now()`;
+}
+
+export async function loadSourceWorkbook(sql) {
+  const [row] = await sql`select file_name, content from public.source_workbooks where key = 'operations'`;
+  return row?.content ? { fileName: row.file_name, bytes: Buffer.from(row.content) } : null;
+}
+
 // ───────────── Acesso (usuários, sessões, tentativas de login) ─────────────
 
 const ACCESS_LOCK = 727001;
