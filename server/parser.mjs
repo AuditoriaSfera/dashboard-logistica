@@ -2,7 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import * as XLSX from "xlsx";
+import * as XLSXModule from "xlsx";
+
+// O pacote publica CommonJS no Node e uma superfície ESM diferente no build
+// do Vinext. Normalizar aqui mantém o parser funcionando nos dois ambientes.
+const XLSX = XLSXModule.default ?? XLSXModule;
 
 const metricConfig = JSON.parse(fs.readFileSync(new URL("../config/metrics.json", import.meta.url), "utf8"));
 let ordersMemo = null;
