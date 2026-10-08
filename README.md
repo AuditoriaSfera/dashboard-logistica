@@ -40,6 +40,8 @@ O servidor mantém os dados em memória e monitora a planilha. Ao salvar o Excel
 
 O arquivo original é somente leitura para esta aplicação: os testes verificam que tamanho e data de modificação não mudam durante o processamento.
 
+Na versão online, o administrador usa **Atualizar dados** para selecionar a nova versão do mesmo Excel. O arquivo é validado antes de substituir a fonte anterior; com `DATABASE_URL` configurada, a planilha e o snapshot calculado ficam persistidos no PostgreSQL e sobrevivem a novos deploys.
+
 ### Fonte online do OneDrive
 
 No Railway, o botão **Atualizar dados** pode baixar automaticamente a versão mais recente do mesmo arquivo no OneDrive/Microsoft 365. Para habilitar essa conexão, configure as variáveis privadas `ONEDRIVE_TENANT_ID`, `ONEDRIVE_CLIENT_ID`, `ONEDRIVE_CLIENT_SECRET`, `ONEDRIVE_DRIVE_ID` e `ONEDRIVE_ITEM_ID` (ou `ONEDRIVE_FILE_PATH`). A aplicação usa Microsoft Graph com permissão de aplicação somente leitura e mantém a cópia anterior como fallback quando a conexão ainda não estiver configurada.
