@@ -895,6 +895,7 @@ export default function Home() {
           <div><p>Dashboard de Operações</p><span>Última atualização: {shortDate.format(new Date(data.source.modifiedAt))}</span></div><img className="topbar-logo" src="/dashboard-logo.png" alt="Sfera Operações" />
           <div className="topbar-actions">{currentUser.accountType === "admin" && <input ref={refreshWorkbookInput} type="file" accept=".xlsx,.xls,.xlsm" hidden onChange={uploadWorkbook} />}<button className="refresh" onClick={() => currentUser.accountType === "admin" ? refreshWorkbookInput.current?.click() : void load(false)} disabled={refreshing} title={currentUser.accountType === "admin" ? "Selecione a nova versão da planilha operacional" : undefined}><RefreshCw className={refreshing ? "spin" : ""} size={17} />{refreshing ? "Atualizando…" : "Atualizar dados"}</button><button className="refresh logout-button" onClick={() => void logout()} disabled={signingOut}>{signingOut ? "Saindo…" : "Sair"}</button></div>
         </header>
+        {error && <p className="error-text" role="alert">{error}</p>}
 
         <Filters data={data} store={store} setStore={setStore} cycle={cycle} setCycle={setCycle} startDate={startDate} setStartDate={setStartDate} endDate={endDate} setEndDate={setEndDate} indicator={indicatorFilter} setIndicator={setIndicatorFilter} status={statusFilter} setStatus={setStatusFilter} />
 

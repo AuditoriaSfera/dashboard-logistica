@@ -130,6 +130,7 @@ export async function POST(request: Request) {
         persisted = true;
       } catch (error) {
         console.error("[refresh] Falha ao gravar no banco:", (error as { code?: string })?.code || (error as Error)?.message);
+        throw new Error("A planilha foi lida, mas não foi possível gravar a atualização no banco de dados. A versão anterior foi mantida no dashboard.");
       }
     }
     return NextResponse.json({ ok: true, fileName: safeName, modifiedAt: snapshot.source.modifiedAt, persisted, connectedSource: Boolean(connectedModifiedAt), reusedSource: !uploaded });
