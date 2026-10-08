@@ -40,6 +40,10 @@ O servidor mantém os dados em memória e monitora a planilha. Ao salvar o Excel
 
 O arquivo original é somente leitura para esta aplicação: os testes verificam que tamanho e data de modificação não mudam durante o processamento.
 
+### Fonte online do OneDrive
+
+No Railway, o botão **Atualizar dados** pode baixar automaticamente a versão mais recente do mesmo arquivo no OneDrive/Microsoft 365. Para habilitar essa conexão, configure as variáveis privadas `ONEDRIVE_TENANT_ID`, `ONEDRIVE_CLIENT_ID`, `ONEDRIVE_CLIENT_SECRET`, `ONEDRIVE_DRIVE_ID` e `ONEDRIVE_ITEM_ID` (ou `ONEDRIVE_FILE_PATH`). A aplicação usa Microsoft Graph com permissão de aplicação somente leitura e mantém a cópia anterior como fallback quando a conexão ainda não estiver configurada.
+
 ## Metas e score
 
 As metas operacionais aprovadas são: PEC / OMNI 99%, Medallia 93%, Plataforma Logística 93%, Recebimento 100% no prazo, Arruamento 92%, Retirada até 3 pedidos, Trilogo até 3 chamados e Quebra de Estoque até 1%. Qualquer recebimento atrasado deixa o indicador fora da meta. Saldo de Pedidos, Retirada Cancelados e Entrega Cancelados são apenas informativos e permanecem sem meta.

@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { NextResponse } from "next/server";
 import { GET as authGet } from "../auth/route";
 import { databaseConfigured, getSql, loadDashboardFromDatabase, loadSourceWorkbook, saveSnapshotToDatabase, saveSourceWorkbook } from "../../../server/db.mjs";
+import { loadOneDriveWorkbook, oneDriveConfigured } from "../../../server/onedrive.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,6 +34,7 @@ function writeJsonAtomically(filePath: string, value: unknown) {
 export async function POST(request: Request) {
   let temporaryWorkbook: string | null = null;
   let uploaded = false;
+  let connectedModifiedAt: string | null = null;
   try {
     await requireAdministrator(request);
     const directory = dataDirectory();
@@ -57,6 +59,14 @@ export async function POST(request: Request) {
     }
 
     const sourcePath = path.join(directory, "Novas Premiações.xlsx");
+    if (!bytes && oneDriveConfigured()) {
+      const connected = await loadOneDriveWorkbook();
+      if (connected) {
+        sourceName = connected.fileName;
+        bytes = connected.bytes;
+        connectedModifiedAt = connected.modifiedAt;
+      }
+    }
     if (!bytes && fs.existsSync(sourcePath)) bytes = fs.readFileSync(sourcePath);
     if (!bytes && databaseConfigured()) {
       const stored = await loadSourceWorkbook(getSql());
@@ -82,7 +92,7 @@ export async function POST(request: Request) {
     const snapshotPath = path.join(directory, "dashboard-snapshot.json");
     const ordersPath = path.join(directory, "pedidos-cumulativos.json");
     const stat = fs.statSync(temporaryWorkbook);
-    snapshot.source = { ...snapshot.source, path: safeName, fileName: safeName, modifiedAt: stat.mtime.toISOString(), size: stat.size, uploadedAt: new Date().toISOString() };
+    snapshot.source = { ...snapshot.source, path: safeName, fileName: safeName, modifiedAt: connectedModifiedAt || stat.mtime.toISOString(), size: stat.size, uploadedAt: new Date().toISOString() };
     // Com banco, o resumo de pedidos já salvo lá é a fonte mais atual (os arquivos do container podem ser antigos).
     let databaseOrders: unknown = null;
     if (databaseConfigured()) {
@@ -122,7 +132,7 @@ export async function POST(request: Request) {
         console.error("[refresh] Falha ao gravar no banco:", (error as { code?: string })?.code || (error as Error)?.message);
       }
     }
-    return NextResponse.json({ ok: true, fileName: safeName, modifiedAt: snapshot.source.modifiedAt, persisted, reusedSource: !uploaded });
+    return NextResponse.json({ ok: true, fileName: safeName, modifiedAt: snapshot.source.modifiedAt, persisted, connectedSource: Boolean(connectedModifiedAt), reusedSource: !uploaded });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Falha ao atualizar a planilha operacional.";
     const status = /administrador|Entre novamente/.test(message) ? 403 : 400;
