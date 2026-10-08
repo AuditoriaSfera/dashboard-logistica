@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import { NextResponse } from "next/server";
 import { GET as authGet } from "../auth/route";
 import { databaseConfigured, getSql, loadDashboardFromDatabase, loadSourceWorkbook, saveSnapshotToDatabase, saveSourceWorkbook } from "../../../server/db.mjs";
 import { loadOneDriveWorkbook, oneDriveConfigured } from "../../../server/onedrive.mjs";
+import { parseWorkbook } from "../../../server/parser.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -79,10 +79,6 @@ export async function POST(request: Request) {
     temporaryWorkbook = path.join(directory, `.upload-${id}.xlsx`);
     fs.writeFileSync(temporaryWorkbook, bytes, { flag: "wx", mode: 0o600 });
 
-    // Load the Node ESM parser at runtime: its XLSX dependency is CommonJS and
-    // should not be folded into the app-router client/server bundle.
-    const parserUrl = pathToFileURL(path.resolve(process.cwd(), "server", "parser.mjs")).href;
-    const { parseWorkbook } = await import(parserUrl);
     const snapshot = parseWorkbook(temporaryWorkbook);
     if (!snapshot?.stores?.length || !snapshot?.indicators || !Object.keys(snapshot.indicators).length) {
       throw new Error("A planilha não contém dados válidos de indicadores; a versão atual foi preservada.");

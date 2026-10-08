@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import XLSX from "xlsx";
+import * as XLSX from "xlsx";
 
 const metricConfig = JSON.parse(fs.readFileSync(new URL("../config/metrics.json", import.meta.url), "utf8"));
 let ordersMemo = null;
