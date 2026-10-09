@@ -66,6 +66,12 @@ curl -s "https://api.github.com/repos/AuditoriaSfera/dashboard-logistica/deploym
   e o Windows já tiveram texto acentuado corrompido — valide acentos (ç, ã, é) após importar planilhas.
 - **Caminhos**: nada de caminho absoluto de máquina (`C:\Users\...`) em código que roda no Railway (Linux).
   Use `process.cwd()`/`import.meta.url`. Caminhos do Carlos só existem no fluxo local (`INICIAR_DASHBOARD.cmd`).
+- **Arquivos do projeto dentro de `server/*.mjs`**: o vinext empacota o código e `import.meta.url` deixa de apontar para
+  `server/`. Nunca leia `config/`, `data/` ou `server/*.py` com `new URL("../x", import.meta.url)`; use `projectFile()`
+  de `server/parser.mjs` (raiz do projeto, ou `process.cwd()` no Railway). Isso já derrubou `POST /api/refresh` com
+  HTTP 500 de corpo vazio (a tela mostrava só "Não foi possível atualizar a planilha").
+- **`XLSX.readFile` não funciona empacotado** ("Cannot access file ..."): use `readWorkbook()` do parser (`XLSX.read` com buffer).
+- Rota nova que importa `server/*.mjs` com dependência pesada: teste **o build de produção** (`vinext start`), não só o `tsc`.
 - **Tipos**: `npx tsc --noEmit` deve ficar com **0 erros**. Props novas precisam ser declaradas e passadas
   (já houve `onStore` usado sem ser recebido → erro só ao clicar numa loja).
 - **ESLint**: existem 8 erros antigos de regras do React 19 (`set-state-in-effect` etc.). Não bloqueiam o deploy;
@@ -127,6 +133,53 @@ criado no próprio projeto do Railway; os mesmos dados também funcionam em qual
 - Quando o dono do Railway criar um Volume, o sistema passa a usá-lo sozinho (sem mudança de código).
   Para uma instalação nova com volume vazio é preciso `ACCESS_ALLOW_INITIAL_SETUP=true` uma única vez.
 - O login valida `Origin`; domínio público vem de `RAILWAY_PUBLIC_DOMAIN` (ou `ACCESS_APP_ORIGIN`).
+
+## Diagnóstico: o banco está funcionando? (`/api/health`)
+
+Endpoint **público e sem dados sensíveis** (`app/api/health/route.ts`). Abra
+`https://dashboard-logistica-production.up.railway.app/api/health` e leia:
+
+| Campo | Significado |
+|---|---|
+| `database.configured` | `false` = a variável `DATABASE_URL` **não chegou** ao serviço (sistema em modo arquivo). |
+| `database.connected` | `false` (HTTP 503) = variável existe mas a conexão falhou; `database.error` traz só o código (ex.: `CONNECT_TIMEOUT`, `28P01` senha errada). |
+| `database.migrations` | Migrações aplicadas. Vazio/ausente = banco novo ou falha ao criar tabelas (veja os logs `[banco]`). |
+| `database.snapshots` | `[]` = banco vazio: falta o administrador enviar a planilha em **Atualizar dados**. |
+| `database.storedWorkbook` | Planilha-base guardada no banco (o botão Atualizar reutiliza). `null` = ainda não enviada. |
+| `dataSource` | `database` ✔, `files (banco ainda vazio...)`, `files (DATABASE_URL não configurada)` ou `files (FALLBACK: banco indisponível)` ✘. |
+| `commit`, `onedriveConfigured` | Versão publicada e se as variáveis `ONEDRIVE_*` existem. |
+
+Além disso `GET /api/dashboard` responde o cabeçalho `X-Data-Source` (`database`, `file`, `file-empty`,
+`file-fallback`) e a tela mostra um aviso quando o banco está configurado mas os dados vieram dos arquivos
+antigos — o fallback **nunca** deve mascarar uma falha do banco silenciosamente.
+
+**"Última atualização: 25/09/2026"** = o dashboard ainda mostra o snapshot antigo versionado em `data/`. Só muda
+depois que um administrador envia a planilha (Atualizar dados). O banco vazio sozinho não atualiza nada.
+
+## Fluxos de atualização de dados
+
+1. **Planilha de indicadores (online)**: administrador clica em **Atualizar dados** → `POST /api/refresh`.
+   Ordem da fonte: arquivo enviado → OneDrive (se `ONEDRIVE_*` configuradas) → arquivo do disco → planilha guardada
+   no banco (`source_workbooks`). Sem nenhuma, devolve 400 "Nenhuma planilha-base..." e a tela abre o seletor de arquivo.
+   A primeira vez **sempre** exige enviar o Excel (ou configurar o OneDrive).
+2. **OneDrive** (`server/onedrive.mjs`): variáveis `ONEDRIVE_TENANT_ID`, `ONEDRIVE_CLIENT_ID`, `ONEDRIVE_CLIENT_SECRET`,
+   `ONEDRIVE_DRIVE_ID` e `ONEDRIVE_ITEM_ID` (ou `ONEDRIVE_FILE_PATH`) no Railway; app registrado no Azure com permissão
+   de aplicação somente leitura (Graph `Files.Read.All`/`Sites.Read.All`). Não testado sem credenciais.
+3. **Pedidos**: a importação usa o leitor em **Python** (`server/parse_orders_large.py`) e só existe no servidor local
+   (`INICIAR_DASHBOARD.cmd`). Online, `POST /api/orders/upload` responde 501 explicando isso. Para publicar pedidos:
+   rode o servidor local com `DATABASE_URL` apontando para a **URL pública** do Postgres do Railway
+   (`DATABASE_PUBLIC_URL`); o import grava resumo, registros e histórico no banco e o site online passa a exibi-los.
+
+## Checklist de teste completo (rode antes de entregar mudanças grandes)
+
+Simule o Railway localmente (produção + banco + disco do container descartável) e confirme, nesta ordem:
+`/api/health` → login admin (senha temporária) + troca de senha → `/api/dashboard` sem login = 401 → com login =
+200 com `X-Data-Source` → Atualizar **sem** planilha = 400 amigável → upload da planilha real =
+200 `persisted:true` → dashboard passa a `database` → **reinicie o servidor com o disco vazio** → sessão, dados e
+Atualizar (reusando a planilha do banco) continuam funcionando → com `DATABASE_URL` errada, `/api/health` = 503.
+Navegue pela tela usando um host que **não** seja `localhost` (ex.: `http://dashboard.localhost:4022`): em `localhost`
+e `127.0.0.1` a página usa a API local `127.0.0.1:8788` por desenho e mostra "Fonte de dados indisponível".
+A planilha real fica no OneDrive da equipe (`Meta Logística/2026/Novas Premiações.xlsx`); use uma **cópia**.
 
 ## Atalhos
 

@@ -665,6 +665,12 @@ export default function Home() {
   const [recurrenceLoading, setRecurrenceLoading] = useState(false);
   const [recurrenceError, setRecurrenceError] = useState("");
   const [error, setError] = useState("");
+  const [sourceWarning, setSourceWarning] = useState("");
+  // X-Data-Source (rota /api/dashboard): avisa quando o banco está configurado mas os dados vieram dos arquivos antigos.
+  const watchDataSource = (response: Response) => {
+    const origin = response.headers.get("x-data-source");
+    setSourceWarning(origin === "file-fallback" ? "Atenção: o banco de dados está indisponível e estes são dados antigos de reserva. Avise o administrador (diagnóstico em /api/health)." : origin === "file-empty" ? "O banco de dados ainda está vazio: use Atualizar dados para importar a planilha e gravar a versão atual." : "");
+  };
   const [refreshing, setRefreshing] = useState(false);
   const [view, setView] = useState("overview");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -754,6 +760,7 @@ export default function Home() {
         return;
       }
       if (!response.ok) throw new Error(body.error || "Não foi possível carregar os dados.");
+      watchDataSource(response);
       setData(body);
       setRecurrenceRecords([]);
     } catch (caught) {
@@ -774,6 +781,7 @@ export default function Home() {
       const response = await fetch("/api/dashboard", { cache: "no-store" });
       const body = await response.json() as DashboardData & { error?: string };
       if (!response.ok) throw new Error(body.error || "Planilha atualizada, mas não foi possível recarregar os indicadores.");
+      watchDataSource(response);
       setData(body);
       setRecurrenceRecords([]);
     } catch (caught) {
@@ -896,6 +904,7 @@ export default function Home() {
           <div className="topbar-actions">{currentUser.accountType === "admin" && <input ref={refreshWorkbookInput} type="file" accept=".xlsx,.xls,.xlsm" hidden onChange={uploadWorkbook} />}<button className="refresh" onClick={() => currentUser.accountType === "admin" ? refreshWorkbookInput.current?.click() : void load(false)} disabled={refreshing} title={currentUser.accountType === "admin" ? "Selecione a nova versão da planilha operacional" : undefined}><RefreshCw className={refreshing ? "spin" : ""} size={17} />{refreshing ? "Atualizando…" : "Atualizar dados"}</button><button className="refresh logout-button" onClick={() => void logout()} disabled={signingOut}>{signingOut ? "Saindo…" : "Sair"}</button></div>
         </header>
         {error && <p className="error-text" role="alert">{error}</p>}
+        {sourceWarning && <p className="error-text" role="status">{sourceWarning}</p>}
 
         <Filters data={data} store={store} setStore={setStore} cycle={cycle} setCycle={setCycle} startDate={startDate} setStartDate={setStartDate} endDate={endDate} setEndDate={setEndDate} indicator={indicatorFilter} setIndicator={setIndicatorFilter} status={statusFilter} setStatus={setStatusFilter} />
 

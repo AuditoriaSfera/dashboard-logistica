@@ -29,24 +29,31 @@ function readSnapshot() {
   return snapshot;
 }
 
-// Banco (Supabase) primeiro: sobrevive a deploys. Sem banco, vazio ou indisponível, usa os arquivos.
-async function readSnapshotPreferringDatabase() {
-  if (databaseConfigured()) {
-    try {
-      const sql = getSql();
-      const fromDatabase = sql ? await loadDashboardFromDatabase(sql) : null;
-      if (fromDatabase) return fromDatabase;
-    } catch (error) {
-      console.error("[dados] Banco indisponível, usando arquivos:", (error as { code?: string })?.code || (error as Error)?.message);
-    }
+// Banco primeiro: sobrevive a deploys. Sem banco, vazio ou indisponível, usa os arquivos e AVISA a origem
+// (cabeçalho X-Data-Source) para a falha do banco não ficar escondida atrás de dados antigos.
+//   database      = dados do PostgreSQL
+//   file          = banco não configurado (modo arquivo)
+//   file-empty    = banco configurado, mas ainda sem snapshot (falta importar a planilha)
+//   file-fallback = banco configurado, porém indisponível (ERRO: veja /api/health)
+async function readSnapshotPreferringDatabase(): Promise<{ snapshot: unknown; source: string }> {
+  if (!databaseConfigured()) return { snapshot: readSnapshot(), source: "file" };
+  try {
+    const fromDatabase = await loadDashboardFromDatabase(getSql());
+    if (fromDatabase) return { snapshot: fromDatabase, source: "database" };
+    return { snapshot: readSnapshot(), source: "file-empty" };
+  } catch (error) {
+    console.error("[dados] Banco indisponível, usando arquivos:", (error as { code?: string })?.code || (error as Error)?.message);
+    return { snapshot: readSnapshot(), source: "file-fallback" };
   }
-  return readSnapshot();
 }
 
 export async function GET(request: Request) {
   const access = await authorize(request);
   if (access.error) return access.error;
-  try { return NextResponse.json(await readSnapshotPreferringDatabase()); }
+  try {
+    const { snapshot, source } = await readSnapshotPreferringDatabase();
+    return NextResponse.json(snapshot, { headers: { "x-data-source": source, "cache-control": "no-store" } });
+  }
   catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Falha ao carregar os dados." }, { status: 503 }); }
 }
 

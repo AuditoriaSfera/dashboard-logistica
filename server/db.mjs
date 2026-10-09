@@ -116,6 +116,23 @@ export function ensureSchema(sql, schema = "public") {
 
 export function resetSchemaStateForTests() { schemaState.clear(); }
 
+/** Diagnóstico sem dados sensíveis (usado por /api/health): migrações aplicadas, snapshots e planilha guardada. */
+export async function databaseStatus(sql) {
+  const started = Date.now();
+  await ensureSchema(sql);
+  const migrations = (await sql`select name from public.schema_migrations order by name`).map((row) => row.name);
+  const snapshots = await sql`select key, source_file, source_modified_at, updated_at from public.dashboard_snapshots order by key`;
+  const [{ records }] = await sql`select count(*)::int as records from public.order_records`;
+  const [workbook] = await sql`select file_name, updated_at, octet_length(content)::int as bytes from public.source_workbooks where key = 'operations'`;
+  return {
+    latencyMs: Date.now() - started,
+    migrations,
+    snapshots: snapshots.map((row) => ({ key: row.key, sourceFile: row.source_file, sourceModifiedAt: row.source_modified_at?.toISOString?.() ?? null, updatedAt: row.updated_at?.toISOString?.() ?? null })),
+    orderRecords: records,
+    storedWorkbook: workbook ? { fileName: workbook.file_name, bytes: workbook.bytes, updatedAt: workbook.updated_at?.toISOString?.() ?? null } : null,
+  };
+}
+
 // A single canonical workbook lets the online refresh button reread the last
 // uploaded source without requiring the administrator to upload it again.
 export async function saveSourceWorkbook(sql, { fileName, bytes }) {

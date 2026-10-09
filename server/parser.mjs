@@ -8,7 +8,20 @@ import * as XLSXModule from "xlsx";
 // do Vinext. Normalizar aqui mantém o parser funcionando nos dois ambientes.
 const XLSX = XLSXModule.default ?? XLSXModule;
 
-const metricConfig = JSON.parse(fs.readFileSync(new URL("../config/metrics.json", import.meta.url), "utf8"));
+// XLSX.readFile só funciona se a biblioteca tiver acesso ao "fs". No build ESM do vinext ela o perde e falha com
+// "Cannot access file ...". Lemos os bytes nós mesmos e usamos XLSX.read, que funciona igual em qualquer ambiente.
+function readWorkbook(filePath, options) {
+  return XLSX.read(fs.readFileSync(filePath), { ...options, type: "buffer" });
+}
+
+// Raiz do projeto. Rodando direto (server/parser.mjs) é a pasta acima; empacotado pelo vinext o arquivo vira
+// dist/server/_next/static/route-*.js e "../config" deixa de existir (a rota /api/refresh caía em HTTP 500 vazio).
+// Nesse caso a raiz é o diretório de execução (o Railway executa a partir da raiz do repositório).
+const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
+const projectRoot = fs.existsSync(path.join(moduleDirectory, "..", "config", "metrics.json")) ? path.resolve(moduleDirectory, "..") : process.cwd();
+const projectFile = (...segments) => path.join(projectRoot, ...segments);
+
+const metricConfig = JSON.parse(fs.readFileSync(projectFile("config", "metrics.json"), "utf8"));
 let ordersMemo = null;
 const ZERO_WHEN_ABSENT = new Set(["retirada", "trilogo"]);
 export const INDICATORS = Object.entries(metricConfig).map(([id, config]) => ({
@@ -147,7 +160,7 @@ function parseMedallia(rows, indicator) {
 function findReceivingChatFile() {
   const candidates = [
     process.env.OPERATIONS_RECEIVING_CHAT_PATH,
-    fileURLToPath(new URL("../data/chat.txt", import.meta.url)),
+    projectFile("data", "chat.txt"),
     path.resolve("chat.txt"),
     path.resolve("data/chat.txt"),
     "C:/Users/carlos.saraiva/Downloads/chat.txt",
@@ -621,7 +634,7 @@ function buildModel(records, source, qualityReport) {
 }
 
 export function parseWorkbook(filePath) {
-  const workbook = XLSX.readFile(filePath, { cellDates: true, cellFormula: true, cellNF: true });
+  const workbook = readWorkbook(filePath, { cellDates: true, cellFormula: true, cellNF: true });
   const records = [];
   const resolvedSheets = {};
   for (const indicator of INDICATORS) {
@@ -817,7 +830,7 @@ function parseCancellationFiscalSummary(filePath) {
 function parseOrdersLargeWorkbook(filePath) {
   const bundledPython = path.resolve(path.dirname(process.execPath), "../../python/python.exe");
   const python = fs.existsSync(bundledPython) ? bundledPython : "python";
-  const script = fileURLToPath(new URL("./parse_orders_large.py", import.meta.url));
+  const script = projectFile("server", "parse_orders_large.py");
   const result = spawnSync(python, [script, filePath], { encoding: "utf8", maxBuffer: 32 * 1024 * 1024, windowsHide: true });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error((result.stderr || "Falha ao processar a planilha grande.").trim());
@@ -825,7 +838,7 @@ function parseOrdersLargeWorkbook(filePath) {
 }
 
 export function parseOrdersWorkbook(filePath) {
-  const workbook = XLSX.readFile(filePath, { cellDates: true });
+  const workbook = readWorkbook(filePath, { cellDates: true });
   const sheetName = workbook.SheetNames.find((name) => normalizeText(name) === "pag") || workbook.SheetNames[0];
   if (!sheetName || !workbook.Sheets[sheetName]) throw new Error("Não foi possível ler a aba Pag. Salve o arquivo novamente como .xlsx pelo Excel antes de importar.");
   const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: null, raw: true });
