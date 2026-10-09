@@ -89,6 +89,11 @@ def parse(path):
         typ = norm((row[c_type] if c_type is not None else '') or '') + ' ' + norm((row[col('Detalhe Entrega')] if col('Detalhe Entrega') is not None else '') or '')
         retirada = 'retirada' in typ or 'retirar na central de servicos' in typ or 'loja' in typ
         cancelled = 'cancelado' in norm(row[c_cancel])
+        reason_key = None; fiscal_key = None
+        if cancelled:
+            d = norm(row[c_reason] if c_reason is not None else '')
+            reason_key = 'usuario' if 'pelo usuario' in d else 'prazoAnalisePagamento' if 'analise do pagamento excedido' in d else 'analisePagamento' if 'analise do pagamento' in d else 'antifraude' if 'antifraude' in d else 'inatividade' if 'inatividade' in d else 'estoque' if 'inconsistencia de estoque' in d else 'inconsistencia' if 'inconsistencia' in d else 'prazoPendencia' if 'pendencia excedido' in d else 'recusaExterna' if 'autorizacao externa' in d else 'outros'
+            fiscal_key = norm(row[c_fiscal] if c_fiscal is not None else '') or None
         b = buckets.setdefault(code, new_bucket(code))
         apply_row(b, row, retirada, cancelled)
         # Mantemos o detalhe de cada pedido para o ranking de recorrência.
@@ -104,6 +109,11 @@ def parse(path):
             'date': day_key,
             'cycle': None,
             'canceled': cancelled,
+            'pickup': retirada,
+            'items': num(row[c_items]) if not cancelled else 0,
+            'cancellationReason': reason_key,
+            'fiscalSituation': fiscal_key,
+            'resellerCategory': ('diamante' if norm(row[c_role]) == 'diamante gb' else norm(row[c_role])) if norm(row[c_role]) != 'consumidor final' else None,
             'store': canonical[code],
         })
         if day_key:

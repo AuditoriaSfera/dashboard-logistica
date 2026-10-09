@@ -66,6 +66,21 @@ async function syncToDatabase(snapshot, reason) {
 }
 
 function mergeOrderSummaries(previous, current) {
+  const recordMap = new Map();
+  for (const record of [...(previous.records || []), ...(current.records || [])]) {
+    const key = String(record.orderCode || `${record.storeCode || record.store}|${record.date || ""}|${record.reseller || ""}|${record.value || 0}`);
+    // A versão mais recente vence quando o mesmo pedido foi corrigido na planilha.
+    recordMap.set(key, record);
+  }
+  const records = [...recordMap.values()];
+  // Quando há detalhes individuais, os totais são derivados da lista deduplicada.
+  // Isso impede que uma nova versão da mesma planilha conte novamente pedidos antigos.
+  if (records.length && records.every((record) => record.pickup !== undefined)) return summarizeOrderRecords(records, current.source);
+  // Compatibilidade com históricos antigos que só guardavam o resumo por loja.
+  return mergeLegacyOrderSummaries(previous, current, records);
+}
+
+function mergeLegacyOrderSummaries(previous, current, records = []) {
   const stores = new Map((previous.stores || []).map((item) => [item.storeCode, { ...item, revendedorCategorias: { ...(item.revendedorCategorias || {}) }, cancelamentoMotivos: { ...(item.cancelamentoMotivos || {}) }, cancelamentoFiscal: { ...(item.cancelamentoFiscal || {}) } }]));
   for (const item of current.stores || []) {
     const target = stores.get(item.storeCode) || { ...item, total: 0, retirada: 0, entrega: 0, revendedor: 0, omni: 0, itens: 0, retiradaCancelados: 0, entregaCancelados: 0, revendedorCategorias: {}, cancelamentoMotivos: {}, cancelamentoFiscal: {} };
@@ -76,12 +91,37 @@ function mergeOrderSummaries(previous, current) {
   }
   const days = Math.max(1, new Set([...(previous.daily || []), ...(current.daily || [])].map((item) => item.date)).size);
   const mergedStores = [...stores.values()].map((item) => ({ ...item, pctEntrega: item.total ? item.entrega / item.total : 0, pctRetirada: item.total ? item.retirada / item.total : 0, mediaRetirada: item.retirada / days, mediaEntrega: item.entrega / days, mediaOmni: item.omni / days, mediaItens: item.itens / days })).sort((a, b) => b.total - a.total);
-  const recordMap = new Map();
-  for (const record of [...(previous.records || []), ...(current.records || [])]) {
-    const key = String(record.orderCode || `${record.storeCode || record.store}|${record.date || ""}|${record.reseller || ""}|${record.value || 0}`);
-    if (!recordMap.has(key)) recordMap.set(key, record);
+  return { ...current, source: { ...current.source, lastImportAt: new Date().toISOString() }, period: { start: [previous.period?.start, current.period?.start].filter(Boolean).sort()[0] || null, end: [previous.period?.end, current.period?.end].filter(Boolean).sort().at(-1) || null, days }, stores: mergedStores, daily: [...(previous.daily || []), ...(current.daily || [])], records };
+}
+
+function summarizeOrderRecords(records, source) {
+  const stores = new Map();
+  const daily = new Map();
+  const dates = new Set();
+  const empty = (record) => ({ store: record.store || "", storeCode: record.storeCode || "", total: 0, retirada: 0, entrega: 0, revendedor: 0, omni: 0, revendedorCategorias: {}, cancelamentoMotivos: {}, cancelamentoFiscal: {}, retiradaCancelados: 0, entregaCancelados: 0, itens: 0 });
+  const apply = (bucket, record) => {
+    const pickup = Boolean(record.pickup);
+    if (record.canceled) {
+      bucket[pickup ? "retiradaCancelados" : "entregaCancelados"] += 1;
+      if (record.cancellationReason) { const pair = bucket.cancelamentoMotivos[record.cancellationReason] || [0, 0]; pair[pickup ? 1 : 0] += 1; bucket.cancelamentoMotivos[record.cancellationReason] = pair; }
+      if (record.fiscalSituation) { const pair = bucket.cancelamentoFiscal[record.fiscalSituation] || [0, 0]; pair[pickup ? 1 : 0] += 1; bucket.cancelamentoFiscal[record.fiscalSituation] = pair; }
+      return;
+    }
+    bucket.total += 1; bucket[pickup ? "retirada" : "entrega"] += 1; bucket.itens += Number(record.items || 0);
+    const role = String(record.role || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    if (role === "consumidor final") bucket.omni += 1;
+    else { bucket.revendedor += 1; const category = record.resellerCategory || "revendedor"; bucket.revendedorCategorias[category] = (bucket.revendedorCategorias[category] || 0) + 1; }
+  };
+  for (const record of records) {
+    if (record.date) dates.add(String(record.date).slice(0, 10));
+    const storeKey = record.storeCode || record.store || "unknown";
+    if (!stores.has(storeKey)) stores.set(storeKey, empty(record));
+    apply(stores.get(storeKey), record);
+    if (record.date) { const dayKey = `${storeKey}|${String(record.date).slice(0, 10)}`; if (!daily.has(dayKey)) daily.set(dayKey, { ...empty(record), date: String(record.date).slice(0, 10) }); apply(daily.get(dayKey), record); }
   }
-  return { ...current, source: { ...current.source, lastImportAt: new Date().toISOString() }, period: { start: [previous.period?.start, current.period?.start].filter(Boolean).sort()[0] || null, end: [previous.period?.end, current.period?.end].filter(Boolean).sort().at(-1) || null, days }, stores: mergedStores, daily: [...(previous.daily || []), ...(current.daily || [])], records: [...recordMap.values()] };
+  const days = Math.max(1, dates.size);
+  const finalize = (item) => ({ ...item, pctEntrega: item.total ? item.entrega / item.total : 0, pctRetirada: item.total ? item.retirada / item.total : 0, mediaRetirada: item.retirada / days, mediaEntrega: item.entrega / days, mediaOmni: item.omni / days, mediaItens: item.itens / days });
+  return { source: { ...source, lastImportAt: new Date().toISOString() }, period: { start: [...dates].sort()[0] || null, end: [...dates].sort().at(-1) || null, days }, stores: [...stores.values()].map(finalize).sort((a, b) => b.total - a.total), daily: [...daily.values()].map(finalize), records };
 }
 
 function usableOrderTotal(snapshot) {
