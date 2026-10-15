@@ -14,6 +14,10 @@ function readWorkbook(filePath, options) {
   return XLSX.read(fs.readFileSync(filePath), { ...options, type: "buffer" });
 }
 
+function readWorkbookBuffer(bytes, options) {
+  return XLSX.read(bytes, { ...options, type: "buffer" });
+}
+
 // Raiz do projeto. Rodando direto (server/parser.mjs) é a pasta acima; empacotado pelo vinext o arquivo vira
 // dist/server/_next/static/route-*.js e "../config" deixa de existir (a rota /api/refresh caía em HTTP 500 vazio).
 // Nesse caso a raiz é o diretório de execução (o Railway executa a partir da raiz do repositório).
@@ -918,6 +922,86 @@ export function parseOrdersWorkbook(filePath) {
   })).sort((a, b) => b.total - a.total || a.store.localeCompare(b.store, "pt-BR"));
   const stat = fs.statSync(filePath);
   return { source: { path: path.resolve(filePath), fileName: path.basename(filePath), modifiedAt: stat.mtime.toISOString() }, period: { start: [...dates].sort()[0] || null, end: [...dates].sort().at(-1) || null, days: dayCount }, stores };
+}
+
+// Parser Node usado pela rota online. Ele trabalha diretamente com os bytes
+// recebidos pelo Railway, sem depender do Python/local e preserva os detalhes
+// necessários para a aba Recorrência.
+export function parseOrdersWorkbookBuffer(bytes, fileName = "pedidos-importados.xlsx") {
+  const workbook = readWorkbookBuffer(bytes, { cellDates: true });
+  const sheetName = workbook.SheetNames.find((name) => normalizeText(name) === "pag") || workbook.SheetNames[0];
+  if (!sheetName || !workbook.Sheets[sheetName]) throw new Error("Não foi possível ler a aba Pag. Salve o arquivo novamente como .xlsx pelo Excel antes de importar.");
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: null, raw: true, blankrows: false });
+  if (!rows.length) throw new Error("A aba Pag não contém linhas de dados.");
+  const headers = (rows.shift() || []).map(normalizeText);
+  const find = (...names) => {
+    const normalized = names.map(normalizeText);
+    return headers.findIndex((header) => normalized.includes(header));
+  };
+  const c = {
+    source: find("CanalDistribuicao"), type: find("Tipo de Entrega"), detailType: find("Detalhe Entrega"),
+    cancel: find("SituaçãoComercial"), reason: find("DetalheSituaçãoComercial", "Detalhe Situacao Comercial"),
+    fiscal: find("SituaçãoFiscal", "Situacao Fiscal"), role: find("Papel"), items: find("QtdeItens"),
+    date: find("Data Captação"), order: find("CodigoPedido", "Código Pedido"), name: find("NomePessoa", "Pessoa"),
+    city: find("Cidade"), value: find("ValorPraticado", "ValorPedido", "ValorTotalSemCCR", "ValorLiquido"),
+    cycle: find("CicloIndicador"),
+  };
+  if ([c.source, c.type, c.cancel, c.role, c.items, c.date].some((index) => index < 0)) throw new Error("A aba Pag não possui todas as colunas necessárias.");
+  const canonical = new Map([
+    ["19826", "Partage"], ["20740", "Madureira"], ["21044", "Alcântara"], ["21469", "Juiz de Fora"],
+    ["21470", "Benfica"], ["21483", "Três Rios"], ["22552", "Raul Soares"], ["22554", "Além Paraíba"],
+    ["22555", "Manhuaçu"], ["22588", "Leopoldina"], ["23318", "Santos Dumont"], ["25195", "Caratinga"],
+    ["23441", "Carangola"], ["24064", "Aimorés"],
+  ]);
+  const resellerRoles = new Set(["bronze", "cobre", "diamante", "diamante gb", "esmeralda gb", "ouro", "platina", "prata", "rubi", "revendedor"]);
+  const numeric = (value) => {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    const text = String(value ?? "").trim().replace(/\s/g, "").replace(/\./g, "").replace(",", ".");
+    const parsed = Number(text);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  const dateValue = (value) => {
+    if (value instanceof Date && !Number.isNaN(value.valueOf())) return value.toISOString().slice(0, 10);
+    const text = String(value ?? "");
+    const br = text.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+    if (br) return `${br[3]}-${br[2]}-${br[1]}`;
+    const iso = text.match(/(\d{4})-(\d{2})-(\d{2})/);
+    return iso ? iso[0] : null;
+  };
+  const reasonKey = (value) => {
+    const text = normalizeText(value);
+    return text.includes("pelo usuario") ? "usuario" : text.includes("analise do pagamento excedido") ? "prazoAnalisePagamento" : text.includes("analise do pagamento") ? "analisePagamento" : text.includes("antifraude") ? "antifraude" : text.includes("inatividade") ? "inatividade" : text.includes("inconsistencia de estoque") ? "estoque" : text.includes("inconsistencia") ? "inconsistencia" : text.includes("pendencia excedido") ? "prazoPendencia" : text.includes("autorizacao externa") ? "recusaExterna" : "outros";
+  };
+  const emptyBucket = (code) => ({ store: canonical.get(code), storeCode: code, total: 0, retirada: 0, entrega: 0, revendedor: 0, omni: 0, revendedorCategorias: {}, cancelamentoMotivos: {}, cancelamentoFiscal: {}, retiradaCancelados: 0, entregaCancelados: 0, itens: 0 });
+  const buckets = new Map(); const daily = new Map(); const dates = new Set(); const records = [];
+  const apply = (bucket, row, pickup, canceled) => {
+    if (canceled) {
+      const field = pickup ? "retiradaCancelados" : "entregaCancelados"; bucket[field] += 1;
+      const reason = reasonKey(row[c.reason]); const counts = bucket.cancelamentoMotivos[reason] || [0, 0]; counts[pickup ? 1 : 0] += 1; bucket.cancelamentoMotivos[reason] = counts;
+      const fiscal = normalizeText(row[c.fiscal]); if (fiscal) { const fiscalCounts = bucket.cancelamentoFiscal[fiscal] || [0, 0]; fiscalCounts[pickup ? 1 : 0] += 1; bucket.cancelamentoFiscal[fiscal] = fiscalCounts; }
+      return;
+    }
+    bucket.total += 1; bucket.itens += numeric(row[c.items]); bucket[pickup ? "retirada" : "entrega"] += 1;
+    const role = normalizeText(row[c.role]); if (role === "consumidor final") bucket.omni += 1;
+    else { bucket.revendedor += 1; const category = role === "diamante gb" ? "diamante" : role; bucket.revendedorCategorias[category] = (bucket.revendedorCategorias[category] || 0) + 1; }
+  };
+  for (const row of rows) {
+    const source = String(row[c.source] ?? ""); const rawCode = source.match(/\b(\d{4,6})\b/)?.[1]; const code = canonicalStoreCode(rawCode);
+    if (!canonical.has(code)) continue;
+    const day = dateValue(row[c.date]); if (day) dates.add(day);
+    const type = normalizeText(`${row[c.type] || ""} ${c.detailType >= 0 ? row[c.detailType] || "" : ""}`);
+    const pickup = type.includes("retirada") || type.includes("retirar na central de servicos") || type.includes("loja");
+    const canceled = normalizeText(row[c.cancel]).includes("cancelado");
+    const bucket = buckets.get(code) || emptyBucket(code); apply(bucket, row, pickup, canceled); buckets.set(code, bucket);
+    const record = { orderCode: c.order >= 0 && row[c.order] != null ? String(row[c.order]) : "", reseller: c.name >= 0 && row[c.name] != null ? String(row[c.name]) : "Não informado", channel: source, role: String(row[c.role] ?? ""), city: c.city >= 0 && row[c.city] != null ? String(row[c.city]) : "", value: numeric(c.value >= 0 ? row[c.value] : 0), date: day, cycle: c.cycle >= 0 ? Number(row[c.cycle]) || null : null, canceled, pickup, items: canceled ? 0 : numeric(row[c.items]), cancellationReason: canceled ? reasonKey(row[c.reason]) : null, fiscalSituation: canceled ? normalizeText(row[c.fiscal]) || null : null, resellerCategory: normalizeText(row[c.role]) === "consumidor final" ? null : normalizeText(row[c.role]) === "diamante gb" ? "diamante" : normalizeText(row[c.role]), store: canonical.get(code), storeCode: code };
+    records.push(record);
+    if (day) { const dailyKey = `${code}|${day}`; const dailyBucket = daily.get(dailyKey) || emptyBucket(code); apply(dailyBucket, row, pickup, canceled); daily.set(dailyKey, dailyBucket); }
+  }
+  const days = Math.max(1, dates.size);
+  const finalize = (bucket) => ({ ...bucket, pctEntrega: bucket.total ? bucket.entrega / bucket.total : 0, pctRetirada: bucket.total ? bucket.retirada / bucket.total : 0, mediaRetirada: bucket.retirada / days, mediaEntrega: bucket.entrega / days, mediaOmni: bucket.omni / days, mediaItens: bucket.itens / days });
+  const stores = [...buckets.values()].map(finalize).sort((a, b) => b.total - a.total || a.store.localeCompare(b.store, "pt-BR"));
+  const dailyRows = [...daily.entries()].map(([key, bucket]) => ({ ...finalize(bucket), date: key.split("|", 2)[1] }));
+  return { source: { fileName, modifiedAt: new Date().toISOString() }, period: { start: [...dates].sort()[0] || null, end: [...dates].sort().at(-1) || null, days: dates.size }, stores, daily: dailyRows, records };
 }
 
 export function findOrdersWorkbook() {

@@ -283,6 +283,16 @@ export async function saveSnapshotToDatabase(sql, { snapshot, orders }) {
   }
 }
 
+export async function saveOrdersSnapshotToDatabase(sql, orders) {
+  await ensureSchema(sql);
+  const summary = withoutRecords(orders);
+  await sql`
+    insert into public.dashboard_snapshots (key, data, source_file, source_modified_at)
+    values (${ORDERS_KEY}, ${sql.json(summary)}, ${summary?.source?.fileName ?? null}, ${summary?.source?.modifiedAt ?? null})
+    on conflict (key) do update set data = excluded.data, source_file = excluded.source_file,
+      source_modified_at = excluded.source_modified_at, updated_at = now()`;
+}
+
 const recordKey = (record) => String(record.orderCode || `${record.storeCode || record.store || ""}|${record.date || ""}|${record.reseller || ""}|${record.value || 0}`);
 
 export async function saveOrderRecords(sql, records) {
@@ -315,7 +325,7 @@ export async function saveOrderRecords(sql, records) {
   return saved;
 }
 
-export async function logOrderImport(sql, { fileName, recordCount, importedBy = null, note = null }) {
+export async function logOrderImport(sql, { fileName, recordCount, importedBy, note }) {
   await ensureSchema(sql);
   await sql`insert into public.order_imports (file_name, record_count, imported_by, note) values (${fileName}, ${recordCount ?? null}, ${importedBy}, ${note})`;
 }
