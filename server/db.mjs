@@ -149,6 +149,37 @@ export async function loadSourceWorkbook(sql) {
   return row?.content ? { fileName: row.file_name, bytes: Buffer.from(row.content) } : null;
 }
 
+const arruamentoStoreKey = (store) => String(store ?? "").trim().toLocaleLowerCase("pt-BR");
+
+export async function saveArruamentoWorkbook(sql, { store, storeCode, fileName, bytes }) {
+  await ensureSchema(sql);
+  const storeKey = arruamentoStoreKey(store);
+  if (!storeKey) throw new Error("Informe a loja da planilha de arruamento.");
+  await sql`
+    insert into public.arruamento_workbooks (store_key, store, store_code, file_name, content)
+    values (${storeKey}, ${store}, ${storeCode}, ${fileName}, ${bytes})
+    on conflict (store_key) do update set store = excluded.store, store_code = excluded.store_code,
+      file_name = excluded.file_name, content = excluded.content, updated_at = now()`;
+}
+
+export async function loadArruamentoWorkbookMeta(sql, store) {
+  await ensureSchema(sql);
+  const storeKey = arruamentoStoreKey(store);
+  const [row] = await sql`
+    select store, store_code, file_name, octet_length(content)::int as bytes, updated_at
+    from public.arruamento_workbooks where store_key = ${storeKey}`;
+  return row ? { store: row.store, storeCode: row.store_code, fileName: row.file_name, bytes: row.bytes, updatedAt: row.updated_at?.toISOString?.() ?? null } : null;
+}
+
+export async function loadArruamentoWorkbook(sql, store) {
+  await ensureSchema(sql);
+  const storeKey = arruamentoStoreKey(store);
+  const [row] = await sql`
+    select store, store_code, file_name, content, updated_at
+    from public.arruamento_workbooks where store_key = ${storeKey}`;
+  return row?.content ? { store: row.store, storeCode: row.store_code, fileName: row.file_name, bytes: Buffer.from(row.content), updatedAt: row.updated_at?.toISOString?.() ?? null } : null;
+}
+
 // ───────────── Acesso (usuários, sessões, tentativas de login) ─────────────
 
 const ACCESS_LOCK = 727001;

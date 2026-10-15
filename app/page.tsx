@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle, BarChart3, Building2, ChevronRight, CircleGauge, Database,
-  LayoutDashboard, Menu, RefreshCw, Settings, Store, Trophy, UserCircle, Users, X,
+  Download, FileSpreadsheet, LayoutDashboard, Menu, RefreshCw, Settings, Store, Trophy, Upload, UserCircle, Users, X,
 } from "lucide-react";
 import {
   Bar, BarChart, CartesianGrid, Line, LineChart,
@@ -399,7 +399,41 @@ function RankingCharts({ indicator }: { indicator: Indicator }) {
   return <div className="ranking-charts"><div className="mini-chart"><h3>Distribuição por situação</h3><ResponsiveContainer width="100%" height="100%"><BarChart data={statusData} margin={{ top: 18, right: 16, left: -16, bottom: 8 }}><CartesianGrid vertical={false} stroke="#edf0f4" /><XAxis dataKey="name" tick={{ fontSize: 11 }} /><YAxis allowDecimals={false} tick={{ fontSize: 11 }} /><Tooltip /><Bar dataKey="value" fill="#3157d5" radius={[4, 4, 0, 0]}><LabelList dataKey="value" position="top" /></Bar></BarChart></ResponsiveContainer></div><div className="mini-chart"><h3>Melhores resultados</h3><ResponsiveContainer width="100%" height="100%"><BarChart data={valueData} layout="vertical" margin={{ top: 8, right: 32, left: 46, bottom: 8 }}><CartesianGrid horizontal={false} stroke="#edf0f4" /><XAxis type="number" hide /><YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={48} /><Tooltip formatter={(value) => [isCount ? integer.format(Number(value)) : `${Number(value).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`, "Resultado"]} /><Bar dataKey="value" fill="#4e9f77" radius={[0, 4, 4, 0]}><LabelList dataKey="value" position="right" formatter={(value) => isCount ? integer.format(Number(value)) : `${Number(value).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`} /></Bar></BarChart></ResponsiveContainer></div></div>;
 }
 
-function IndicatorDetailTable({ indicator, onStore }: { indicator: Indicator; onStore: (store: string) => void }) {
+function ArruamentoWorkbookAction({ store, storeCode, currentUser }: { store: string; storeCode?: string | null; currentUser: AccessUser }) {
+  type WorkbookMeta = { exists: boolean; fileName?: string; updatedAt?: string | null; error?: string };
+  const canAccess = currentUser.accountType === "admin" || currentUser.stores.some((item) => normalizeText(item) === normalizeText(store));
+  const [meta, setMeta] = useState<WorkbookMeta | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  useEffect(() => {
+    if (!canAccess) return;
+    let active = true;
+    fetch(`/api/arruamento?store=${encodeURIComponent(store)}`, { cache: "no-store" })
+      .then((response) => response.json())
+      .then((body) => { if (active) setMeta(body as WorkbookMeta); })
+      .catch(() => { if (active) setMeta({ exists: false }); });
+    return () => { active = false; };
+  }, [canAccess, store]);
+  if (!canAccess) return null;
+  const upload = async (file: File) => {
+    setBusy(true); setMessage("");
+    try {
+      const form = new FormData(); form.append("workbook", file);
+      const response = await fetch(`/api/arruamento?store=${encodeURIComponent(store)}&storeCode=${encodeURIComponent(storeCode || "")}`, { method: "POST", body: form });
+      const body = await response.json().catch(() => null) as WorkbookMeta | null;
+      if (!response.ok) throw new Error(body?.error || "Não foi possível importar a planilha.");
+      setMeta({ exists: true, fileName: body?.fileName }); setMessage("Atualizada");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Falha ao importar a planilha."); }
+    finally { setBusy(false); }
+  };
+  return <div className="arruamento-workbook-action">
+    {currentUser.accountType === "admin" && <label className="arruamento-upload-button" title={`Importar planilha de ${store}`}><Upload size={14} /><span>{busy ? "Importando…" : "Importar"}</span><input type="file" accept=".xlsx,.xls,.xlsm,.csv" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; event.currentTarget.value = ""; if (file) void upload(file); }} /></label>}
+    {meta?.exists ? <a className="arruamento-open-button" href={`/api/arruamento?store=${encodeURIComponent(store)}&download=1`}><Download size={14} />Abrir</a> : <span className="arruamento-empty"><FileSpreadsheet size={14} />Não enviada</span>}
+    {message && <small className={message === "Atualizada" ? "arruamento-success" : "arruamento-error"}>{message}</small>}
+  </div>;
+}
+
+function IndicatorDetailTable({ indicator, onStore, currentUser }: { indicator: Indicator; onStore: (store: string) => void; currentUser: AccessUser }) {
   const rows = indicator.ranking;
   const receivingDateKeys = indicator.id === "recebimento"
     ? indicator.records.map((item) => String(item.date || item.periodEnd || item.periodStart || "").slice(0, 10)).filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value)).sort()
@@ -457,7 +491,7 @@ function IndicatorDetailTable({ indicator, onStore }: { indicator: Indicator; on
     return { primary: integer.format(records.length), secondary: notes ? `${integer.format(notes)} observações` : "Sem observações", label: "Registros" };
   };
   const columns = indicator.id === "arruamento"
-      ? ["Loja / código", "SKUs vendidos", "Produtos arruados", "Sem arrumamento", "Resultado", "Situação"]
+      ? ["Loja / código", "SKUs vendidos", "Produtos arruados", "Sem arrumamento", "Resultado", "Situação", "Conferência"]
     : indicator.id === "recebimento"
       ? ["Loja / código", "Recebimentos", "Volumes", "Atrasados", "Resultado", "Situação"]
     : indicator.id === "retirada"
@@ -467,7 +501,7 @@ function IndicatorDetailTable({ indicator, onStore }: { indicator: Indicator; on
         : indicator.id === "trilogo"
           ? ["Loja / código", "Chamados", "Resultado", "Situação"]
           : ["Loja / código", "Registros", "Resultado", "Situação"];
-  return <div className="indicator-detail-table-wrap"><table className="indicator-detail-table"><thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{rows.map((row) => { const item = detail(row); const receiving = indicator.id === "recebimento"; const stockBreak = indicator.id === "quebra-estoque"; const arrangement = indicator.id === "arruamento"; return <tr key={row.store}><th><button onClick={() => onStore(row.store)}><span>{row.store}</span><small>{row.storeCode || "Código não informado"}</small></button></th>{arrangement ? <><td><strong>{item.skuTotal}</strong></td><td><strong>{item.arranged}</strong></td><td><strong>{item.withoutArrangement}</strong></td></> : <td><strong>{item.primary}</strong>{item.secondary && <small>{item.secondary}</small>}</td>}{receiving && <td><strong>{item.volumes}</strong><small>{item.weeklyVolumes ? `Média ${item.weeklyVolumes}` : ""}</small></td>}{receiving && <td><strong>{item.late}</strong></td>}{stockBreak && <td><strong>{item.sold}</strong></td>}<td><strong>{indicator.id === "retirada" ? integer.format(row.count) : formatValue(row.value, indicator.id)}</strong><small>{row.target == null ? "Sem meta" : `Meta: ${formatTarget(indicator.id, row.target)}`}</small></td><td><Badge status={row.status} informational={isInformational(indicator.id)} /></td></tr>; })}</tbody></table>{!rows.length && <p className="muted">Nenhuma loja disponível neste recorte.</p>}</div>;
+  return <div className="indicator-detail-table-wrap"><table className="indicator-detail-table"><thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{rows.map((row) => { const item = detail(row); const receiving = indicator.id === "recebimento"; const stockBreak = indicator.id === "quebra-estoque"; const arrangement = indicator.id === "arruamento"; return <tr key={row.store}><th><button onClick={() => onStore(row.store)}><span>{row.store}</span><small>{row.storeCode || "Código não informado"}</small></button></th>{arrangement ? <><td><strong>{item.skuTotal}</strong></td><td><strong>{item.arranged}</strong></td><td><strong>{item.withoutArrangement}</strong></td></> : <td><strong>{item.primary}</strong>{item.secondary && <small>{item.secondary}</small>}</td>}{receiving && <td><strong>{item.volumes}</strong><small>{item.weeklyVolumes ? `Média ${item.weeklyVolumes}` : ""}</small></td>}{receiving && <td><strong>{item.late}</strong></td>}{stockBreak && <td><strong>{item.sold}</strong></td>}<td><strong>{indicator.id === "retirada" ? integer.format(row.count) : formatValue(row.value, indicator.id)}</strong><small>{row.target == null ? "Sem meta" : `Meta: ${formatTarget(indicator.id, row.target)}`}</small></td><td><Badge status={row.status} informational={isInformational(indicator.id)} /></td>{arrangement && <td><ArruamentoWorkbookAction store={row.store} storeCode={row.storeCode} currentUser={currentUser} /></td>}</tr>; })}</tbody></table>{!rows.length && <p className="muted">Nenhuma loja disponível neste recorte.</p>}</div>;
 }
 
 function RankingSummary({ indicator }: { indicator: Indicator }) {
@@ -929,10 +963,10 @@ export default function Home() {
             <section className="page-head"><div><span className="eyebrow">Indicador</span><h1>{chosen.label}</h1><p>Meta, evolução, ranking e registros normalizados.</p></div>{(!isWithdrawal(chosen.id) || store.length > 0) && <Badge status={chosen.current.status} informational={isInformational(chosen.id)} />}</section>
              <section className="summary-grid three"><article><span>{isWithdrawal(chosen.id) ? "Situação" : "Resultado geral"}</span><strong>{isWithdrawal(chosen.id) ? store.length === 1 ? <><ResultValue result={chosen.current} id={chosen.id} /> pedidos em atraso</> : "\u00a0" : <ResultValue result={chosen.current} id={chosen.id} />}</strong></article><article><span>Meta</span><strong>{isInformational(chosen.id) ? "Apenas visualização" : formatTarget(chosen.id, chosen.current.target)}</strong></article><article><span>{isWithdrawal(chosen.id) ? "Apuração" : "Diferença"}</span><strong>{isWithdrawal(chosen.id) ? chosen.label : isInformational(chosen.id) ? "Não se aplica" : deltaText(chosen.current.value, chosen.current.target, chosen.direction, chosen.id)}</strong></article></section>
              {isWithdrawal(chosen.id)
-                  ? <><section className="panel"><h2>{chosen.label}</h2><RankingSummary indicator={chosen} /><IndicatorDetailTable indicator={chosen} onStore={openStore} /></section><StoreComparisonChart indicator={chosen} /><section className="panel"><h2>{trendTitle(chosen)}</h2><Trend indicator={chosen} selectedCycle={cycle} /></section></>
+                  ? <><section className="panel"><h2>{chosen.label}</h2><RankingSummary indicator={chosen} /><IndicatorDetailTable indicator={chosen} onStore={openStore} currentUser={currentUser} /></section><StoreComparisonChart indicator={chosen} /><section className="panel"><h2>{trendTitle(chosen)}</h2><Trend indicator={chosen} selectedCycle={cycle} /></section></>
                 : chosen.id === "medallia"
                   ? <><section className="panel medallia-list-panel"><h2>{chosen.label}</h2><RankingSummary indicator={chosen} /><MedalliaTable indicator={chosen} /></section><StoreComparisonChart indicator={chosen} /><section className="panel"><h2>{trendTitle(chosen)}</h2><Trend indicator={chosen} selectedCycle={cycle} /></section></>
-                  : <><section className="panel"><h2>{chosen.label}</h2><RankingSummary indicator={chosen} />{DETAILED_INDICATORS.has(chosen.id) ? <IndicatorDetailTable indicator={chosen} onStore={openStore} /> : <Ranking indicator={chosen} onStore={openStore} showMedalliaDetails={Boolean(cycle)} />}</section><StoreComparisonChart indicator={chosen} /><section className="panel"><h2>{trendTitle(chosen)}</h2><Trend indicator={chosen} selectedCycle={cycle} /></section></>}
+                  : <><section className="panel"><h2>{chosen.label}</h2><RankingSummary indicator={chosen} />{DETAILED_INDICATORS.has(chosen.id) ? <IndicatorDetailTable indicator={chosen} onStore={openStore} currentUser={currentUser} /> : <Ranking indicator={chosen} onStore={openStore} showMedalliaDetails={Boolean(cycle)} />}</section><StoreComparisonChart indicator={chosen} /><section className="panel"><h2>{trendTitle(chosen)}</h2><Trend indicator={chosen} selectedCycle={cycle} /></section></>}
              {chosen.id === "medallia" && !cycle && <section className="panel"><h2>Principais reclamações</h2><div className="complaints">{chosen.records.filter((item) => item.complaints).slice(-12).map((item, index) => <button key={index} onClick={() => openStore(item.store)}><strong>{item.store} <small>{item.storeCode}</small></strong><span>{item.complaints}</span></button>)}</div></section>}
             {chosen.id.endsWith("cancelados") && <section className="panel"><h2>Saldo Total por loja</h2><p className="muted">Percentual direto da planilha — abaixo de 2% é melhor.</p><div className="chart"><ResponsiveContainer width="100%" height={360}><BarChart data={chosen.ranking.slice().reverse().map((item) => ({ ...item, valuePct: (item.value || 0) * 100 }))} layout="vertical"><CartesianGrid horizontal={false} stroke="#e7e9ed" /><XAxis type="number" unit="%" domain={[0, 100]} /><YAxis dataKey="store" type="category" width={110} tick={{ fontSize: 11 }} /><Tooltip formatter={(value) => [`${Number(value).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%`, "Saldo Total"]} /><ReferenceLine x={2} stroke="#f59e0b" strokeDasharray="4 4" label={{ value: "Meta 2%", position: "insideTopRight", fill: "#b45309", fontSize: 11 }} /><Bar dataKey="valuePct" fill="#3157d5" radius={[0, 5, 5, 0]} /></BarChart></ResponsiveContainer></div></section>}
           </>}
