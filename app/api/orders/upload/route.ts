@@ -59,12 +59,21 @@ export async function POST(request: Request) {
     if (access.error) return access.error;
     if (access.user.accountType !== "admin") return NextResponse.json({ error: "Somente administradores podem importar a planilha de pedidos." }, { status: 403 });
     if (!databaseConfigured()) return NextResponse.json({ error: "O banco de dados não está configurado no Railway para receber os pedidos." }, { status: 503 });
-    const form = await request.formData();
-    const file = form.get("workbook") || form.get("file");
-    if (!(file instanceof File)) return NextResponse.json({ error: "Selecione a planilha de pedidos." }, { status: 400 });
-    if (!file.size || file.size > MAX_BYTES) return NextResponse.json({ error: "A planilha está vazia ou excede o limite de 300 MB." }, { status: 413 });
-    const fileName = file.name.replace(/[^\p{L}\p{N}._ -]/gu, "_");
-    const parsed = parseOrdersWorkbookBuffer(Buffer.from(await file.arrayBuffer()), fileName);
+    const contentType = request.headers.get("content-type") || "";
+    let bytes: Buffer;
+    let originalName = request.headers.get("x-file-name") || "pedidos-importados.xlsx";
+    if (contentType.toLowerCase().includes("multipart/form-data")) {
+      const form = await request.formData();
+      const file = form.get("workbook") || form.get("file");
+      if (!(file instanceof File)) return NextResponse.json({ error: "Selecione a planilha de pedidos." }, { status: 400 });
+      bytes = Buffer.from(await file.arrayBuffer());
+      originalName = file.name;
+    } else {
+      bytes = Buffer.from(await request.arrayBuffer());
+    }
+    if (!bytes.length || bytes.length > MAX_BYTES) return NextResponse.json({ error: "A planilha está vazia ou excede o limite de 300 MB." }, { status: 413 });
+    const fileName = originalName.replace(/^UTF-8''/i, "").replace(/[^\p{L}\p{N}._ -]/gu, "_");
+    const parsed = parseOrdersWorkbookBuffer(bytes, fileName);
     if (!parsed.records.length || !parsed.stores.length) return NextResponse.json({ error: "A aba Pag não contém pedidos válidos das lojas cadastradas." }, { status: 400 });
     const sql = getSql();
     const previousSummary = (await loadDashboardFromDatabase(sql))?.orders || null;
