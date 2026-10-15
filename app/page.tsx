@@ -575,7 +575,9 @@ function OrdersView({ data, selectedStore, cycle, startDate, endDate, onImported
     if (!file) return;
     setUploading(true); setUploadError("");
     try {
-      const response = await fetch(`${API}/api/orders/upload`, { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream", "X-File-Name": encodeURIComponent(file.name) }, body: await file.arrayBuffer() });
+      const form = new FormData();
+      form.append("workbook", file, file.name);
+      const response = await fetch(`${API}/api/orders/upload`, { method: "POST", body: form });
       const body = (await response.json().catch(() => ({}))) as { error?: string };
       if (!response.ok) throw new Error(body.error || "Não foi possível importar o arquivo.");
       await onImported();
