@@ -293,7 +293,9 @@ export async function saveOrdersSnapshotToDatabase(sql, orders) {
       source_modified_at = excluded.source_modified_at, updated_at = now()`;
 }
 
-const recordKey = (record) => String(record.orderCode || `${record.storeCode || record.store || ""}|${record.date || ""}|${record.reseller || ""}|${record.value || 0}`);
+const ORDER_FIELDS = ["orderCode", "reseller", "channel", "role", "city", "value", "date", "cycle", "canceled", "pickup", "items", "cancellationReason", "fiscalSituation", "resellerCategory", "store", "storeCode"];
+const orderField = (record, name) => Array.isArray(record) ? record[ORDER_FIELDS.indexOf(name)] : record?.[name];
+const recordKey = (record) => String(orderField(record, "orderCode") || `${orderField(record, "storeCode") || orderField(record, "store") || ""}|${orderField(record, "date") || ""}|${orderField(record, "reseller") || ""}|${orderField(record, "value") || 0}`);
 
 export async function saveOrderRecords(sql, records) {
   await ensureSchema(sql);
@@ -301,17 +303,17 @@ export async function saveOrderRecords(sql, records) {
   for (let start = 0; start < records.length; start += BATCH) {
     const rows = records.slice(start, start + BATCH).map((record) => ({
       record_key: recordKey(record),
-      order_code: record.orderCode ? String(record.orderCode) : null,
-      reseller: String(record.reseller ?? ""),
-      channel: String(record.channel ?? ""),
-      role: String(record.role ?? ""),
-      city: String(record.city ?? ""),
-      store: record.store ?? null,
-      store_code: record.storeCode ?? null,
-      cycle: record.cycle ?? null,
-      value: Number(record.value) || 0,
-      order_date: /^\d{4}-\d{2}-\d{2}/.test(String(record.date ?? "")) ? String(record.date).slice(0, 10) : null,
-      canceled: Boolean(record.canceled),
+      order_code: orderField(record, "orderCode") ? String(orderField(record, "orderCode")) : null,
+      reseller: String(orderField(record, "reseller") ?? ""),
+      channel: String(orderField(record, "channel") ?? ""),
+      role: String(orderField(record, "role") ?? ""),
+      city: String(orderField(record, "city") ?? ""),
+      store: orderField(record, "store") ?? null,
+      store_code: orderField(record, "storeCode") ?? null,
+      cycle: orderField(record, "cycle") ?? null,
+      value: Number(orderField(record, "value")) || 0,
+      order_date: /^\d{4}-\d{2}-\d{2}/.test(String(orderField(record, "date") ?? "")) ? String(orderField(record, "date")).slice(0, 10) : null,
+      canceled: Boolean(orderField(record, "canceled")),
     }));
     // Mesma chave dentro do lote não pode aparecer duas vezes no upsert.
     const unique = [...new Map(rows.map((row) => [row.record_key, row])).values()];

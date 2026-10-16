@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import * as XLSXModule from "xlsx";
+import { Unzip, UnzipInflate } from "fflate";
 
 // O pacote publica CommonJS no Node e uma superfície ESM diferente no build
 // do Vinext. Normalizar aqui mantém o parser funcionando nos dois ambientes.
@@ -924,13 +925,101 @@ export function parseOrdersWorkbook(filePath) {
   return { source: { path: path.resolve(filePath), fileName: path.basename(filePath), modifiedAt: stat.mtime.toISOString() }, period: { start: [...dates].sort()[0] || null, end: [...dates].sort().at(-1) || null, days: dayCount }, stores };
 }
 
+// Algumas exportações do ConsultaPedidos usam tags XML com o prefixo `x:` e
+// não informam `dimension` no worksheet. O SheetJS reconhece a aba, mas não
+// cria células nesse caso. Este leitor percorre apenas a aba Pag em fluxo,
+// sem descompactar os 2+ GB do XML inteiro na memória.
+function parseOrdersStreamed(bytes, fileName, options = {}) {
+  const canonical = new Map([
+    ["19826", "Partage"], ["20740", "Madureira"], ["21044", "Alcântara"], ["21469", "Juiz de Fora"],
+    ["21470", "Benfica"], ["21483", "Três Rios"], ["22552", "Raul Soares"], ["22554", "Além Paraíba"],
+    ["22555", "Manhuaçu"], ["22588", "Leopoldina"], ["23318", "Santos Dumont"], ["25195", "Caratinga"],
+    ["23441", "Carangola"], ["24064", "Aimorés"],
+  ]);
+  const headers = new Map(); const buckets = new Map(); const daily = new Map(); const dates = new Set(); const records = [];
+  let headerReady = false; let carry = ""; let rowCount = 0; let recordLines = [];
+  const saveRecord = (record) => { if (options.recordFile) { recordLines.push(`${JSON.stringify(record)}\n`); if (recordLines.length >= 1000) { fs.appendFileSync(options.recordFile, recordLines.join("")); recordLines = []; } } else records.push(record); };
+  const decodeXml = (value) => String(value ?? "").replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n))).replace(/&#x([\da-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16))).replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+  const colNumber = (letters) => [...String(letters)].reduce((n, letter) => n * 26 + letter.charCodeAt(0) - 64, 0);
+  const valueOf = (row, ...names) => {
+    for (const name of names) { const column = headers.get(normalizeText(name)); if (column && row.has(column)) return row.get(column); }
+    return null;
+  };
+  const numeric = (value) => {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    const text = String(value ?? "").trim().replace(/\s/g, "").replace(/\./g, "").replace(",", ".");
+    const parsed = Number(text); return Number.isFinite(parsed) ? parsed : 0;
+  };
+  const dateValue = (value) => { const text = String(value ?? ""); const br = text.match(/(\d{2})\/(\d{2})\/(\d{4})/); if (br) return `${br[3]}-${br[2]}-${br[1]}`; const iso = text.match(/(\d{4})-(\d{2})-(\d{2})/); return iso ? iso[0] : null; };
+  const reasonKey = (value) => { const text = normalizeText(value); return text.includes("pelo usuario") ? "usuario" : text.includes("analise do pagamento excedido") ? "prazoAnalisePagamento" : text.includes("analise do pagamento") ? "analisePagamento" : text.includes("antifraude") ? "antifraude" : text.includes("inatividade") ? "inatividade" : text.includes("inconsistencia de estoque") ? "estoque" : text.includes("inconsistencia") ? "inconsistencia" : text.includes("pendencia excedido") ? "prazoPendencia" : text.includes("autorizacao externa") ? "recusaExterna" : "outros"; };
+  const emptyBucket = (code) => ({ store: canonical.get(code), storeCode: code, total: 0, retirada: 0, entrega: 0, revendedor: 0, omni: 0, itens: 0, retiradaCancelados: 0, entregaCancelados: 0, revendedorCategorias: {}, cancelamentoMotivos: {}, cancelamentoFiscal: {} });
+  const apply = (bucket, row, pickup, canceled) => {
+    if (canceled) {
+      const field = pickup ? "retiradaCancelados" : "entregaCancelados"; bucket[field] += 1;
+      const reason = reasonKey(valueOf(row, "DetalheSituaçãoComercial", "Detalhe Situacao Comercial")); const pair = bucket.cancelamentoMotivos[reason] || [0, 0]; pair[pickup ? 1 : 0] += 1; bucket.cancelamentoMotivos[reason] = pair;
+      const fiscal = normalizeText(valueOf(row, "SituaçãoFiscal", "Situacao Fiscal")); if (fiscal) { const fiscalPair = bucket.cancelamentoFiscal[fiscal] || [0, 0]; fiscalPair[pickup ? 1 : 0] += 1; bucket.cancelamentoFiscal[fiscal] = fiscalPair; }
+      return;
+    }
+    bucket.total += 1; bucket.itens += numeric(valueOf(row, "QtdeItens")); bucket[pickup ? "retirada" : "entrega"] += 1;
+    const role = normalizeText(valueOf(row, "Papel")); if (role === "consumidor final") bucket.omni += 1; else { bucket.revendedor += 1; const category = role === "diamante gb" ? "diamante" : role; bucket.revendedorCategorias[category] = (bucket.revendedorCategorias[category] || 0) + 1; }
+  };
+  const consumeRow = (xml) => {
+    const cells = new Map(); const cellPattern = /<(?:[A-Za-z_][\w.-]*:)?c\b([^>]*)>([\s\S]*?)<\/(?:[A-Za-z_][\w.-]*:)?c>/g; let match;
+    while ((match = cellPattern.exec(xml))) {
+      const ref = match[1].match(/\br="([A-Z]+)\d+"/i)?.[1]; if (!ref) continue;
+      const body = match[2]; const raw = body.match(/<(?:[A-Za-z_][\w.-]*:)?(?:v|t)>([\s\S]*?)<\/(?:[A-Za-z_][\w.-]*:)?(?:v|t)>/)?.[1] ?? ""; cells.set(colNumber(ref), decodeXml(raw));
+    }
+    if (!headerReady) { for (const [column, value] of cells) headers.set(normalizeText(value), column); headerReady = true; return; }
+    rowCount += 1;
+    const source = String(valueOf(cells, "CanalDistribuicao") ?? ""); const rawCode = source.match(/\b(\d{4,6})\b/)?.[1]; const code = canonicalStoreCode(rawCode); if (!canonical.has(code)) return;
+    const day = dateValue(valueOf(cells, "Data Captação")); if (day) dates.add(day);
+    const type = normalizeText(`${valueOf(cells, "Tipo de Entrega") || ""} ${valueOf(cells, "Detalhe Entrega") || ""}`); const pickup = type.includes("retirada") || type.includes("retirar na central de servicos") || type.includes("loja");
+    const canceled = normalizeText(valueOf(cells, "SituaçãoComercial")).includes("cancelado"); const bucket = buckets.get(code) || emptyBucket(code); apply(bucket, cells, pickup, canceled); buckets.set(code, bucket);
+    saveRecord([
+      String(valueOf(cells, "CodigoPedido", "Código Pedido") ?? ""), String(valueOf(cells, "NomePessoa", "Pessoa") ?? "Não informado"), source,
+      String(valueOf(cells, "Papel") ?? ""), String(valueOf(cells, "Cidade") ?? ""), numeric(valueOf(cells, "ValorPraticado", "ValorPedido", "ValorTotalSemCCR", "ValorLiquido")), day,
+      Number(valueOf(cells, "CicloIndicador")) || null, canceled, pickup, canceled ? 0 : numeric(valueOf(cells, "QtdeItens")),
+      canceled ? reasonKey(valueOf(cells, "DetalheSituaçãoComercial", "Detalhe Situacao Comercial")) : null,
+      canceled ? normalizeText(valueOf(cells, "SituaçãoFiscal", "Situacao Fiscal")) || null : null,
+      normalizeText(valueOf(cells, "Papel")) === "consumidor final" ? null : normalizeText(valueOf(cells, "Papel")), canonical.get(code), code,
+    ]);
+    if (day) { const key = `${code}|${day}`; const dayBucket = daily.get(key) || emptyBucket(code); apply(dayBucket, cells, pickup, canceled); daily.set(key, dayBucket); }
+  };
+  const consumeXml = (chunk, final = false) => {
+    carry += chunk;
+    const rowStartPattern = /<(?:[A-Za-z_][\w.-]*:)?row\b/;
+    const rowEndPattern = /<\/(?:[A-Za-z_][\w.-]*:)?row>/;
+    let endMatch;
+    while ((endMatch = carry.match(rowEndPattern))) {
+      const end = endMatch.index;
+      const endExclusive = end + endMatch[0].length;
+      const startMatch = carry.match(rowStartPattern);
+      const start = startMatch?.index ?? -1;
+      if (start < 0 || start > end) { carry = carry.slice(endExclusive); continue; }
+      consumeRow(carry.slice(start, endExclusive)); carry = carry.slice(endExclusive);
+    }
+    if (final) { const startMatch = carry.match(rowStartPattern); if (startMatch) { const endMatchFinal = carry.match(rowEndPattern); if (endMatchFinal) consumeRow(carry.slice(startMatch.index, endMatchFinal.index + endMatchFinal[0].length)); } }
+  };
+  const unzip = new Unzip((entry) => { if (entry.name !== "xl/worksheets/sheet1.xml") { entry.ondata = () => {}; entry.start(); return; } const decoder = new TextDecoder(); entry.ondata = (error, data, final) => { if (error) throw error; consumeXml(decoder.decode(data, { stream: !final }), final); }; entry.start(); });
+  unzip.register(UnzipInflate);
+  const chunkSize = 1024 * 1024; for (let start = 0; start < bytes.length; start += chunkSize) unzip.push(bytes.subarray(start, Math.min(bytes.length, start + chunkSize)), start + chunkSize >= bytes.length);
+  if (recordLines.length && options.recordFile) fs.appendFileSync(options.recordFile, recordLines.join(""));
+  if (!headerReady || rowCount === 0) throw new Error("A aba Pag não contém linhas de dados.");
+  const days = Math.max(1, dates.size); const finalize = (bucket) => ({ ...bucket, pctEntrega: bucket.total ? bucket.entrega / bucket.total : 0, pctRetirada: bucket.total ? bucket.retirada / bucket.total : 0, mediaRetirada: bucket.retirada / days, mediaEntrega: bucket.entrega / days, mediaOmni: bucket.omni / days, mediaItens: bucket.itens / days });
+  return { source: { fileName, modifiedAt: new Date().toISOString() }, period: { start: [...dates].sort()[0] || null, end: [...dates].sort().at(-1) || null, days: dates.size }, stores: [...buckets.values()].map(finalize).sort((a, b) => b.total - a.total || a.store.localeCompare(b.store, "pt-BR")), daily: [...daily.entries()].map(([key, bucket]) => ({ ...finalize(bucket), date: key.split("|", 2)[1] })), records, recordFile: options.recordFile || null };
+}
+
 // Parser Node usado pela rota online. Ele trabalha diretamente com os bytes
 // recebidos pelo Railway, sem depender do Python/local e preserva os detalhes
 // necessários para a aba Recorrência.
-export function parseOrdersWorkbookBuffer(bytes, fileName = "pedidos-importados.xlsx") {
+export function parseOrdersWorkbookBuffer(bytes, fileName = "pedidos-importados.xlsx", options = {}) {
+  try { return parseOrdersStreamed(bytes, fileName, options); } catch (streamError) {
+    // Arquivos menores/convencionais continuam usando o leitor completo como fallback.
+  }
   const workbook = readWorkbookBuffer(bytes, { cellDates: true });
   const sheetName = workbook.SheetNames.find((name) => normalizeText(name) === "pag") || workbook.SheetNames[0];
-  if (!sheetName || !workbook.Sheets[sheetName]) throw new Error("Não foi possível ler a aba Pag. Salve o arquivo novamente como .xlsx pelo Excel antes de importar.");
+  if (!sheetName) throw new Error("Não foi possível localizar a aba Pag no arquivo enviado.");
+  if (!workbook.Sheets[sheetName]) throw new Error("A aba Pag não contém linhas de dados.");
   const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: null, raw: true, blankrows: false });
   if (!rows.length) throw new Error("A aba Pag não contém linhas de dados.");
   const headers = (rows.shift() || []).map(normalizeText);
