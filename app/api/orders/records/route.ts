@@ -15,6 +15,7 @@ function readFromFiles() {
 export async function GET(request: Request) {
   const access = await authorize(request);
   if (access.error) return access.error;
+  if (access.user.accountType !== "admin") return NextResponse.json({ error: "Acesso restrito ao administrador." }, { status: 403 });
   try {
     if (databaseConfigured()) {
       try {

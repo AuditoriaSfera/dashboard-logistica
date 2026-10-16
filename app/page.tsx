@@ -722,6 +722,9 @@ export default function Home() {
   const [activeIndicator, setActiveIndicator] = useState("");
   const [activeStore, setActiveStore] = useState("");
   const [currentUser, setCurrentUser] = useState<AccessUser | null>(null);
+  useEffect(() => {
+    if (currentUser && currentUser.accountType !== "admin" && ["performance", "recurrence", "quality", "cadastro", "settings"].includes(view)) setView("overview");
+  }, [currentUser, view]);
   const [authError, setAuthError] = useState("");
   const [authReady, setAuthReady] = useState(false);
   const sessionRevision = useRef(0);
@@ -914,11 +917,12 @@ export default function Home() {
   const rotationPosition = rotationTotal ? overviewRotation % rotationTotal : 0;
   const rotationEntry = rotationEntries[rotationPosition];
   const evolutionIndicator = filteredIndicators.find((item) => item.trend.length > 1) || chosen;
-  const nav = [
+    const nav = [
     ["overview", "Visão Geral", LayoutDashboard], ["stores", "360° Por Loja", Store],
     ["ranking", "Ranking", Trophy], ["performance", "Pedidos", CircleGauge], ["recurrence", "Recorrência", Users],
     ["quality", "Qualidade dos dados", Database], ["cadastro", "Usuários", Users], ["profile", "Meu perfil", UserCircle], ["settings", "Configurações", Settings],
   ] as const;
+    const restrictedViews = new Set(["performance", "recurrence", "quality", "cadastro", "settings"]);
 
   if (!authReady) return <main className="fatal"><RefreshCw className="spin" size={36} /><h1>Preparando acesso</h1></main>;
   if (authError && !currentUser) return <main className="fatal"><h1>Não foi possível verificar o acesso</h1><p>{authError}</p><button onClick={() => void refreshSession()}>Tentar novamente</button></main>;
@@ -931,7 +935,7 @@ export default function Home() {
     <div className="app-shell">
       <aside className={`sidebar ${menuOpen ? "open" : ""}`}>
         <div className="brand"><img className="sidebar-logo" src="/dashboard-mark-transparent.png" alt="Sfera Operações" /><div><small>Performance de lojas</small></div><button className="close-menu" onClick={() => setMenuOpen(false)}><X /></button></div>
-        <nav>{nav.filter(([id]) => id !== "cadastro" || currentUser.accountType === "admin").map(([id, label, Icon]) => <button key={id} className={view === id ? "active" : ""} onClick={() => { setView(id); setMenuOpen(false); }}><Icon size={18} />{label}</button>)}</nav>
+        <nav>{nav.filter(([id]) => currentUser.accountType === "admin" || !restrictedViews.has(id)).map(([id, label, Icon]) => <button key={id} className={view === id ? "active" : ""} onClick={() => { setView(id); setMenuOpen(false); }}><Icon size={18} />{label}</button>)}</nav>
         <div className="nav-group"><span>Indicadores</span>{data.filters.indicators.map((item) => <button key={item.id} className={view === "indicator" && activeIndicator === item.id ? "active" : ""} onClick={() => openIndicator(item.id)}><BarChart3 size={16} />{item.label}</button>)}</div>
         <div className="source-mini"><Database size={16} /><div><strong>Fonte conectada</strong><small>{data.source.fileName}</small></div></div>
       </aside>

@@ -29,6 +29,32 @@ function readSnapshot() {
   return snapshot;
 }
 
+const normalizeStore = (value: unknown) => String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+function scopeForUser(snapshot: any, user: { accountType: string; stores: string[] }) {
+  if (user.accountType === "admin") return snapshot;
+  const allowed = new Set((user.stores || []).map(normalizeStore));
+  const inScope = (value: unknown) => allowed.has(normalizeStore(value));
+  const indicators = Object.fromEntries(Object.entries(snapshot.indicators || {}).map(([id, indicator]: [string, any]) => [id, {
+    ...indicator,
+    records: (indicator.records || []).filter((row: any) => inScope(row.store)),
+    ranking: (indicator.ranking || []).filter((row: any) => inScope(row.store)),
+    trend: [],
+    generalByCycle: {},
+    current: { ...indicator.current, value: null, status: "unknown", count: 0 },
+  }]));
+  const stores = (snapshot.stores || []).filter((row: any) => inScope(row.store));
+  return {
+    ...snapshot,
+    stores,
+    indicators,
+    alerts: (snapshot.alerts || []).filter((row: any) => inScope(row.store)),
+    filters: { ...snapshot.filters, stores: stores.map((row: any) => row.store) },
+    meta: { ...snapshot.meta, storeCount: stores.length },
+    orders: null,
+    quality: { issues: [], summary: {} },
+  };
+}
+
 // Banco primeiro: sobrevive a deploys. Sem banco, vazio ou indisponível, usa os arquivos e AVISA a origem
 // (cabeçalho X-Data-Source) para a falha do banco não ficar escondida atrás de dados antigos.
 //   database      = dados do PostgreSQL
@@ -52,7 +78,7 @@ export async function GET(request: Request) {
   if (access.error) return access.error;
   try {
     const { snapshot, source } = await readSnapshotPreferringDatabase();
-    return NextResponse.json(snapshot, { headers: { "x-data-source": source, "cache-control": "no-store" } });
+    return NextResponse.json(scopeForUser(snapshot, access.user), { headers: { "x-data-source": source, "cache-control": "no-store" } });
   }
   catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Falha ao carregar os dados." }, { status: 503 }); }
 }
