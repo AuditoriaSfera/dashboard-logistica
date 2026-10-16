@@ -16,12 +16,11 @@ const field = (record: any, name: typeof ORDER_FIELDS[number]) => Array.isArray(
 const keyOf = (record: any) => String(field(record, "orderCode") || `${field(record, "storeCode") || field(record, "store") || ""}|${field(record, "date") || ""}|${field(record, "reseller") || ""}|${field(record, "value") || 0}`);
 const number = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
 
-// Exportações ConsultaPedidos com um período anual são snapshots completos,
-// não incrementos semanais. Elas substituem o histórico anterior de Pedidos;
-// a planilha e o parser continuam exatamente os mesmos.
-function isCompleteOrdersSnapshot(fileName: string, parsed: any) {
-  const name = fileName.normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").toLowerCase();
-  return name.startsWith("consultapedidos") && Number(parsed?.period?.days || 0) >= 250;
+// Uma exportação que cobre praticamente o ano inteiro é um snapshot completo,
+// não um incremento semanal. A decisão usa o período real lido da planilha,
+// pois o navegador/servidor pode renomear o arquivo para pedidos-importados.xlsx.
+function isCompleteOrdersSnapshot(_fileName: string, parsed: any) {
+  return Number(parsed?.period?.days || 0) >= 250;
 }
 
 function emptyStore(record: { store?: string; storeCode?: string }) {
