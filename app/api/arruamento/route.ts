@@ -20,15 +20,26 @@ async function access(request: Request) {
   return { user: result.user, store };
 }
 
+function cycleOf(request: Request, required = false) {
+  const raw = new URL(request.url).searchParams.get("cycle")?.trim() || "";
+  const cycle = Number(raw);
+  if (!Number.isInteger(cycle) || cycle < 1 || cycle > 99) {
+    if (required) return { error: NextResponse.json({ error: "Selecione um ciclo válido para a planilha de arruamento." }, { status: 400 }) };
+    return { cycle: 0 };
+  }
+  return { cycle };
+}
+
 export async function GET(request: Request) {
   const current = await access(request);
   if (current.response) return current.response;
   if (!databaseConfigured()) return NextResponse.json({ error: "O banco de dados não está configurado para guardar as planilhas de arruamento." }, { status: 503 });
   const sql = getSql();
   const download = new URL(request.url).searchParams.get("download") === "1";
-  const workbook = download ? await loadArruamentoWorkbook(sql, current.store) : await loadArruamentoWorkbookMeta(sql, current.store);
-  if (!workbook) return NextResponse.json({ exists: false, store: current.store });
-  if (!download) return NextResponse.json({ exists: true, store: current.store, fileName: workbook.fileName, bytes: workbook.bytes, updatedAt: workbook.updatedAt });
+  const selected = cycleOf(request);
+  const workbook = download ? await loadArruamentoWorkbook(sql, current.store, selected.cycle) : await loadArruamentoWorkbookMeta(sql, current.store, selected.cycle);
+  if (!workbook) return NextResponse.json({ exists: false, store: current.store, cycle: selected.cycle || null });
+  if (!download) return NextResponse.json({ exists: true, store: current.store, cycle: workbook.cycle, fileName: workbook.fileName, bytes: workbook.bytes, updatedAt: workbook.updatedAt });
   return new Response(workbook.bytes, {
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -41,6 +52,8 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const current = await access(request);
   if (current.response) return current.response;
+  const selected = cycleOf(request, true);
+  if (selected.error) return selected.error;
   if (current.user.accountType !== "admin") return NextResponse.json({ error: "Somente administradores podem importar a planilha de arruamento." }, { status: 403 });
   if (!databaseConfigured()) return NextResponse.json({ error: "O banco de dados não está configurado para guardar as planilhas de arruamento." }, { status: 503 });
   const form = await request.formData();
@@ -50,6 +63,6 @@ export async function POST(request: Request) {
   if (!file.size || file.size > MAX_BYTES) return NextResponse.json({ error: "A planilha está vazia ou excede o limite de 100 MB." }, { status: 413 });
   const storeCode = new URL(request.url).searchParams.get("storeCode")?.trim() || null;
   const fileName = file.name.replace(/[^\p{L}\p{N}._ -]/gu, "_");
-  await saveArruamentoWorkbook(getSql(), { store: current.store, storeCode: storeCode ?? undefined, fileName, bytes: Buffer.from(await file.arrayBuffer()) });
-  return NextResponse.json({ ok: true, store: current.store, fileName });
+  await saveArruamentoWorkbook(getSql(), { store: current.store, storeCode: storeCode ?? undefined, cycle: selected.cycle, fileName, bytes: Buffer.from(await file.arrayBuffer()) });
+  return NextResponse.json({ ok: true, store: current.store, cycle: selected.cycle, fileName });
 }
