@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { authorize } from "../../../../server/auth.mjs";
-import { databaseConfigured, getSql, loadOrderRecordsFromDatabase, loadDashboardFromDatabase, logOrderImport, saveOrderRecords, saveOrdersSnapshotToDatabase } from "../../../../server/db.mjs";
+import { clearOrderRecords, databaseConfigured, getSql, loadOrderRecordsFromDatabase, loadDashboardFromDatabase, logOrderImport, saveOrderRecords, saveOrdersSnapshotToDatabase } from "../../../../server/db.mjs";
 import { parseOrdersWorkbookBuffer } from "../../../../server/parser.mjs";
 
 export const runtime = "nodejs";
@@ -15,6 +15,14 @@ const ORDER_FIELDS = ["orderCode", "reseller", "channel", "role", "city", "value
 const field = (record: any, name: typeof ORDER_FIELDS[number]) => Array.isArray(record) ? record[ORDER_FIELDS.indexOf(name)] : record?.[name];
 const keyOf = (record: any) => String(field(record, "orderCode") || `${field(record, "storeCode") || field(record, "store") || ""}|${field(record, "date") || ""}|${field(record, "reseller") || ""}|${field(record, "value") || 0}`);
 const number = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
+
+// Exportações ConsultaPedidos com um período anual são snapshots completos,
+// não incrementos semanais. Elas substituem o histórico anterior de Pedidos;
+// a planilha e o parser continuam exatamente os mesmos.
+function isCompleteOrdersSnapshot(fileName: string, parsed: any) {
+  const name = fileName.normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").toLowerCase();
+  return name.startsWith("consultapedidos") && Number(parsed?.period?.days || 0) >= 250;
+}
 
 function emptyStore(record: { store?: string; storeCode?: string }) {
   return { store: field(record, "store") || "", storeCode: field(record, "storeCode") || "", total: 0, retirada: 0, entrega: 0, revendedor: 0, omni: 0, itens: 0, retiradaCancelados: 0, entregaCancelados: 0, revendedorCategorias: {} as Record<string, number>, cancelamentoMotivos: {} as Record<string, [number, number]>, cancelamentoFiscal: {} as Record<string, [number, number]> };
@@ -109,13 +117,15 @@ export async function POST(request: Request) {
     const parsed = parseOrdersWorkbookBuffer(bytes, fileName, { recordFile });
     if (!parsed.stores.length) return NextResponse.json({ error: "A aba Pag não contém pedidos válidos das lojas cadastradas." }, { status: 400 });
     const sql = getSql();
-    const previousSummary = (await loadDashboardFromDatabase(sql))?.orders || null;
-    const previousRecords = (await loadOrderRecordsFromDatabase(sql)).records || [];
+    const replacesHistory = isCompleteOrdersSnapshot(fileName, parsed);
+    const previousSummary = replacesHistory ? null : (await loadDashboardFromDatabase(sql))?.orders || null;
+    const previousRecords = replacesHistory ? [] : (await loadOrderRecordsFromDatabase(sql)).records || [];
+    if (replacesHistory) await clearOrderRecords(sql);
     const imported = await importStreamedRecords(recordFile, sql, parsed, previousRecords, previousSummary);
     const orders = imported.orders;
     await saveOrdersSnapshotToDatabase(sql, orders);
-    await logOrderImport(sql, { fileName, recordCount: imported.imported, importedBy: null, note: `Importação online; ${imported.ignored} duplicidades ignoradas.` });
-    return NextResponse.json({ ok: true, fileName, imported: imported.imported, ignoredDuplicates: imported.ignored, totalRecords: previousRecords.length + imported.imported, persisted: true });
+    await logOrderImport(sql, { fileName, recordCount: imported.imported, importedBy: null, note: replacesHistory ? `Snapshot anual; histórico anterior substituído. ${imported.ignored} duplicidades internas ignoradas.` : `Importação online; ${imported.ignored} duplicidades ignoradas.` });
+    return NextResponse.json({ ok: true, fileName, imported: imported.imported, ignoredDuplicates: imported.ignored, replacedHistory: replacesHistory, totalRecords: previousRecords.length + imported.imported, persisted: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Falha ao importar a planilha de pedidos.";
     return NextResponse.json({ error: message }, { status: 400 });

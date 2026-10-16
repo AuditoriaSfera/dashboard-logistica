@@ -327,6 +327,12 @@ export async function saveOrderRecords(sql, records) {
   return saved;
 }
 
+export async function clearOrderRecords(sql) {
+  await ensureSchema(sql);
+  const [result] = await sql`delete from public.order_records`;
+  return Number(result?.count ?? 0);
+}
+
 export async function logOrderImport(sql, { fileName, recordCount, importedBy, note }) {
   await ensureSchema(sql);
   await sql`insert into public.order_imports (file_name, record_count, imported_by, note) values (${fileName}, ${recordCount ?? null}, ${importedBy}, ${note})`;
