@@ -137,6 +137,7 @@ const record = (indicator, data) => ({
   numerator: data.numerator ?? null,
   denominator: data.denominator ?? null,
   volume: data.volume ?? null,
+  sourceRow: data.sourceRow ?? null,
   statusSource: data.statusSource ?? null,
   notes: data.notes ?? null,
   complaints: data.complaints ?? null,
@@ -166,12 +167,13 @@ function parseMedallia(rows, indicator) {
     const total = row.slice(labelIndex + 1).map(number).find((item) => item != null);
     if (activeCycle != null && total != null) generalByCycle.set(String(activeCycle), total);
   });
-  return rows.slice(headerIndex + 1).flatMap((row) => {
+  return rows.slice(headerIndex + 1).flatMap((row, rowOffset) => {
     if (!row[col.store] || normalizeText(row[col.store]).includes("nps total")) return [];
     const store = storeParts(row[col.store]);
     return [record(indicator, {
       storeCode: store.code, store: store.name, cycle: number(row[col.cycle]),
       periodStart: excelDate(row[col.start]), periodEnd: excelDate(row[col.end]),
+      sourceRow: headerIndex + rowOffset + 2,
       value: ratio(row[col.nps]), volume: number(row[col.responses]),
       notes: row[col.notes] || null, complaints: row[col.complaints] || null,
       raw: {
@@ -283,6 +285,7 @@ function parseRecebimento(rows, indicator) {
     const within = statusSource ? normalizeText(statusSource).includes("dentro") : days == null ? null : days <= 2;
     return [record(indicator, {
       storeCode: store.code, store: store.name, cycle: number(row[c.cycle]),
+      sourceRow: sheetRow,
       // A competência do Recebimento é determinada pela data em que a carga
       // foi recebida. A data de entrada/conferência serve para apurar o SLA,
       // mas não deve mover a linha para outro ciclo.
@@ -324,11 +327,13 @@ function parseRetirada(rows, indicator) {
     return [
       separationIssue ? record(indicator, {
         storeCode: store.code, store: store.name, cycle: number(row[c.cycle]), date: excelDate(row[c.date]),
+        sourceRow: h + rowIndex + 2,
         value: 1, unit: "count", notes: row[c.notes] || null,
         raw: { scoreType: "sem_separacao_apos_16h", sourceMark: row[c.separation], orderKey: rowIndex },
       }) : null,
       cancellationIssue ? record(indicator, {
         storeCode: store.code, store: store.name, cycle: number(row[c.cycle]), date: excelDate(row[c.date]),
+        sourceRow: h + rowIndex + 2,
         value: 1, unit: "count", notes: row[c.notes] || null,
         raw: { scoreType: "sem_cancelamento", sourceMark: row[c.cancellation], orderKey: rowIndex },
       }) : null,
@@ -361,6 +366,7 @@ function parseCancellation(rows, indicator) {
       const performance = cancellationRate == null ? null : Math.max(0, Math.min(1, cancellationRate));
       result.push(record(indicator, {
         storeCode: store.code, store: store.name, date: periodEnd, value: performance,
+        sourceRow: r + 1,
         numerator: totalCaptured == null ? null : totalCancelled || 0,
         denominator: totalCaptured, volume: totalCaptured,
         raw: { sourceSaldoTotal, cancellationRate, performance, totalCaptured, totalCancelled },
@@ -379,7 +385,7 @@ function parseTrilogo(rows, indicator) {
     ticket: findColumn(headers, ["ticket", "chamado"]), status: findColumn(headers, ["status"]),
     notes: findColumn(headers, ["observ"]),
   };
-  return rows.slice(h + 1).flatMap((row) => {
+  return rows.slice(h + 1).flatMap((row, rowOffset) => {
     if (!row[c.store] || (c.ticket >= 0 && !row[c.ticket])) return [];
     const store = storeParts(row[c.store]);
     return [record(indicator, {
@@ -388,6 +394,7 @@ function parseTrilogo(rows, indicator) {
       // A data de verificação permanece disponível no raw para auditoria,
       // mas não deve determinar a competência do ciclo.
       date: excelDate(c.openedAt >= 0 ? row[c.openedAt] : row[c.verifyDate]), value: 1, unit: "count",
+      sourceRow: h + rowOffset + 2,
       statusSource: c.status >= 0 ? row[c.status] : null,
       notes: c.notes >= 0 ? row[c.notes] || null : null,
       raw: Object.fromEntries(headers.map((header, index) => [String(header ?? `column_${index + 1}`), row[index]])),
@@ -403,7 +410,7 @@ function parseQuebra(rows, indicator) {
     broken: findColumn(headers, ["quebra de itens"]), sold: findColumn(headers, ["itens vendidos"]),
     value: findColumn(headers, ["sem quebra", "%"]),
   };
-  return rows.slice(h + 1).flatMap((row) => {
+  return rows.slice(h + 1).flatMap((row, rowOffset) => {
     if (!row[c.store]) return [];
     const store = storeParts(row[c.store]);
     const broken = number(row[c.broken]);
@@ -411,6 +418,7 @@ function parseQuebra(rows, indicator) {
     const value = sold ? (broken || 0) / sold : ratio(row[c.value]);
     return [record(indicator, {
       storeCode: store.code, store: store.name, cycle: number(row[c.cycle]),
+      sourceRow: h + rowOffset + 2,
       periodStart: excelDate(row[c.start]), periodEnd: excelDate(row[c.end]), value,
       numerator: broken, denominator: sold, volume: sold, raw: { brokenItems: broken, soldItems: sold },
     })];
@@ -439,6 +447,7 @@ function parseSaldo(rows, indicator) {
       const performance = fulfillmentRate == null ? null : Math.max(0, Math.min(1, fulfillmentRate));
       result.push(record(indicator, {
         storeCode: store.code, store: store.name, date: periodEnd,
+        sourceRow: r + 1,
         value: performance, volume: totalCaptured,
         raw: { sourceSaldoTotal, fulfillmentRate, performance, totalCaptured, totalBilled },
       }));
@@ -470,7 +479,7 @@ function parseGeneric(rows, indicator) {
     const general = row.slice(labelIndex + 1).map(number).find((item) => item != null);
     if (general != null) generalByCycle.set(String(activeCycle), ratio(general));
   });
-  return rows.slice(h + 1).flatMap((row) => {
+  return rows.slice(h + 1).flatMap((row, rowOffset) => {
     if (!row || row.every((cell) => cell == null || cell === "")) return [];
     const storeCell = row[c.store];
     if (!storeCell || /total|media|resultado geral|nps total/i.test(String(storeCell))) return [];
@@ -490,6 +499,7 @@ function parseGeneric(rows, indicator) {
     }
     return [record(indicator, {
       storeCode: store.code, store: store.name,
+      sourceRow: h + rowOffset + 2,
       cycle: c.cycle >= 0 ? number(row[c.cycle]) : null,
       periodStart: c.start >= 0 ? excelDate(row[c.start]) : null,
       periodEnd: c.end >= 0 ? excelDate(row[c.end]) : null,
@@ -592,11 +602,14 @@ function quality(records, workbook, resolvedSheets) {
     if (item.unit === "percent" && item.value != null && (item.value < 0 || item.value > 1.2)) add("high", "invalid_percent", `Percentual fora do intervalo: ${item.value}`, { indicator: item.indicator, store: item.store });
     if (!["recebimento", "retirada", "retirada-cancelados", "entrega-cancelados"].includes(item.indicator)) {
       const key = [item.indicator, item.storeCode || normalizeText(item.store), item.cycle, item.date].join("|");
-      keys.set(key, (keys.get(key) || 0) + 1);
+      const duplicate = keys.get(key) || { count: 0, records: [] };
+      duplicate.count += 1;
+      duplicate.records.push({ line: item.sourceRow, store: item.store, cycle: item.cycle, date: item.date, value: item.value, indicator: item.indicator });
+      keys.set(key, duplicate);
     }
   });
-  [...keys.entries()].filter(([, count]) => count > 1).slice(0, 50)
-    .forEach(([key, count]) => add("medium", "duplicate_grain", `Possível duplicidade (${count} registros)`, { key }));
+  [...keys.entries()].filter(([, duplicate]) => duplicate.count > 1).slice(0, 50)
+    .forEach(([key, duplicate]) => add("medium", "duplicate_grain", `Possível duplicidade (${duplicate.count} registros)`, { key, duplicateRecords: duplicate.records }));
   return {
     workbookSheets: workbook.SheetNames, issues,
     summary: issues.reduce((acc, item) => ({ ...acc, [item.severity]: (acc[item.severity] || 0) + 1 }), {}),
