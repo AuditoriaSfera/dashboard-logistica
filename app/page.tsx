@@ -702,17 +702,6 @@ function OrderRecurrenceView({ data, records, loading, error, selectedStore, cyc
   </>;
 }
 
-const actionGuidance: Record<string, string> = {
-  "pec-omni": "Validar atendimento e disponibilidade no canal OMNI.",
-  medallia: "Revisar as reclamações e o plano de recuperação da loja.",
-  "plataforma-logistica": "Conferir pendências de separação, expedição e transporte.",
-  recebimento: "Verificar NFs atrasadas e alinhar a causa com a operação.",
-  arruamento: "Revisar o arruamento da loja e registrar os produtos faltantes.",
-  retirada: "Atacar pedidos em atraso e a capacidade de retirada.",
-  trilogo: "Revisar chamados abertos e o tempo de solução.",
-  "quebra-estoque": "Conferir divergências de estoque e a causa raiz.",
-};
-
 function AuditView({ events, loading, error, onReload }: { events: AuditEvent[]; loading: boolean; error: string; onReload: () => void }) {
   return <>
     <section className="page-head"><div><span className="eyebrow">Governança</span><h1>Auditoria de atividades</h1><p>Registro das alterações relevantes feitas no dashboard e no banco.</p></div><button className="refresh" type="button" onClick={onReload} disabled={loading}><RefreshCw className={loading ? "spin" : ""} size={16} />{loading ? "Atualizando…" : "Atualizar auditoria"}</button></section>
@@ -937,9 +926,7 @@ export default function Home() {
         const gap = item.value != null && item.target != null
           ? metric.direction === "lower" ? item.value - item.target : item.target - item.value
           : 0;
-        const gapMagnitude = Math.abs(gap);
-        const critical = COUNT_INDICATORS.has(item.indicator) ? gapMagnitude >= 3 : gapMagnitude >= 0.05;
-        return { ...item, gap, priority: critical ? "Crítica" : "Alta", guidance: actionGuidance[item.indicator] || "Abrir a visão da loja e definir o responsável pela correção." };
+        return { ...item, gap };
       })
       .sort((a, b) => b.gap - a.gap || a.store.localeCompare(b.store, "pt-BR"))
       .slice(0, 8);
@@ -1039,7 +1026,7 @@ export default function Home() {
 
           {view === "stores" && <><section className="page-head"><div><span className="eyebrow">Lojas</span><h1>Visão 360° por loja</h1><p>Selecione uma unidade para detalhar sua operação.</p></div></section><div className="store-grid">{workingData.stores.map((item) => <button key={item.store} onClick={() => openStore(item.store)}><Store /><strong>{item.store}</strong><small className="store-code">{item.storeCode}</small><span>{Object.values(item.indicators).filter((result) => result.status === "bad").length} pontos de atenção</span><ChevronRight /></button>)}</div></>}
 
-          {view === "ranking" && <><section className="page-head"><div><span className="eyebrow">Benchmark interno</span><h1>Ranking de Lojas</h1><p>Melhores e piores resultados por indicador.</p></div><span className="data-chip">{priorityAlerts.length} ações priorizadas</span></section><article className="panel attention ranking-priority-card"><div className="section-title"><div><h2>Fila de ações prioritárias</h2><p>Ocorrências fora da meta, ordenadas pelo maior desvio. Clique para abrir a loja.</p></div><span className="table-hint">Prioridade calculada pelo desvio</span></div><div className="alert-list">{priorityAlerts.map((item, index) => <button key={`${item.store}-${item.indicator}-${index}`} onClick={() => openStore(item.store)}><AlertTriangle size={17} /><span><strong>{item.store} <small>{item.storeCode}</small><em className={`priority-label ${item.priority === "Crítica" ? "critical" : "high"}`}>{item.priority}</em></strong><small>{workingData.indicators[item.indicator]?.label} • {formatResult(item, item.indicator)} • {formatGap(item.gap, item.indicator)}</small><small className="action-guidance">Próxima ação: {item.guidance}</small></span><ChevronRight size={16} /></button>)}{!priorityAlerts.length && <p className="muted">Nenhuma ocorrência crítica calculável.</p>}</div></article><div className="indicator-panels">{filteredIndicators.map((item) => <article className="panel" key={item.id}><h2>{item.label}</h2><Ranking indicator={item} onStore={openStore} /></article>)}</div></>}
+          {view === "ranking" && <><section className="page-head"><div><span className="eyebrow">Benchmark interno</span><h1>Ranking de Lojas</h1><p>Melhores e piores resultados por indicador.</p></div></section><article className="panel attention ranking-priority-card"><div className="section-title"><div><h2>Prioridade de ação</h2><p>Ocorrências fora da meta, ordenadas pelo maior desvio.</p></div></div><div className="alert-list">{priorityAlerts.map((item, index) => <button key={`${item.store}-${item.indicator}-${index}`} onClick={() => openStore(item.store)}><AlertTriangle size={17} /><span><strong>{item.store} <small>{item.storeCode}</small></strong><small>{workingData.indicators[item.indicator]?.label} • {formatResult(item, item.indicator)} • {formatGap(item.gap, item.indicator)}</small></span><ChevronRight size={16} /></button>)}{!priorityAlerts.length && <p className="muted">Nenhuma ocorrência crítica calculável.</p>}</div></article><div className="indicator-panels">{filteredIndicators.map((item) => <article className="panel" key={item.id}><h2>{item.label}</h2><Ranking indicator={item} onStore={openStore} /></article>)}</div></>}
 
           {view === "performance" && <OrdersView data={data} selectedStore={store} cycle={cycle} startDate={startDate} endDate={endDate} onImported={() => load(true)} />}
 
