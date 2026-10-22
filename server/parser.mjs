@@ -50,6 +50,26 @@ const number = (value) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+// Valores da aba Pag podem chegar como números do XML do Excel ("1234.56")
+// ou como textos formatados no padrão brasileiro ("1.234,56"). Não remova
+// pontos cegamente: no primeiro formato o ponto é o separador decimal.
+const orderNumber = (value) => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  let text = String(value ?? "").trim().replace(/[R$\s\u00a0]/g, "");
+  if (!text) return 0;
+  const comma = text.lastIndexOf(",");
+  const dot = text.lastIndexOf(".");
+  if (comma >= 0 && dot >= 0) {
+    text = comma > dot ? text.replace(/\./g, "").replace(",", ".") : text.replace(/,/g, "");
+  } else if (comma >= 0) {
+    text = text.replace(",", ".");
+  } else if (/^-?\d{1,3}(?:\.\d{3})+$/.test(text)) {
+    text = text.replace(/\./g, "");
+  }
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
 const ratio = (value) => {
   const n = number(value);
   return n == null ? null : Math.abs(n) > 1.5 ? n / 100 : n;
@@ -862,7 +882,7 @@ export function parseOrdersWorkbook(filePath) {
     const match = String(value ?? "").match(/(\d{2})\/(\d{2})\/(\d{4})/);
     return match ? `${match[3]}-${match[2]}-${match[1]}` : null;
   };
-  const numeric = (value) => Number(String(value ?? "").replace(/\./g, "").replace(",", ".")) || 0;
+  const numeric = (value) => orderNumber(value);
   for (const row of rows) {
     const source = String(row["CanalDistribuicao"] || "");
     const rawCode = source.match(/\b(\d{4,6})\b/)?.[1] || null;
@@ -945,11 +965,7 @@ function parseOrdersStreamed(bytes, fileName, options = {}) {
     for (const name of names) { const column = headers.get(normalizeText(name)); if (column && row.has(column)) return row.get(column); }
     return null;
   };
-  const numeric = (value) => {
-    if (typeof value === "number" && Number.isFinite(value)) return value;
-    const text = String(value ?? "").trim().replace(/\s/g, "").replace(/\./g, "").replace(",", ".");
-    const parsed = Number(text); return Number.isFinite(parsed) ? parsed : 0;
-  };
+  const numeric = (value) => orderNumber(value);
   const dateValue = (value) => { const text = String(value ?? ""); const br = text.match(/(\d{2})\/(\d{2})\/(\d{4})/); if (br) return `${br[3]}-${br[2]}-${br[1]}`; const iso = text.match(/(\d{4})-(\d{2})-(\d{2})/); return iso ? iso[0] : null; };
   const reasonKey = (value) => { const text = normalizeText(value); return text.includes("pelo usuario") ? "usuario" : text.includes("analise do pagamento excedido") ? "prazoAnalisePagamento" : text.includes("analise do pagamento") ? "analisePagamento" : text.includes("antifraude") ? "antifraude" : text.includes("inatividade") ? "inatividade" : text.includes("inconsistencia de estoque") ? "estoque" : text.includes("inconsistencia") ? "inconsistencia" : text.includes("pendencia excedido") ? "prazoPendencia" : text.includes("autorizacao externa") ? "recusaExterna" : "outros"; };
   const emptyBucket = (code) => ({ store: canonical.get(code), storeCode: code, total: 0, retirada: 0, entrega: 0, revendedor: 0, omni: 0, itens: 0, retiradaCancelados: 0, entregaCancelados: 0, revendedorCategorias: {}, cancelamentoMotivos: {}, cancelamentoFiscal: {} });
@@ -1043,12 +1059,7 @@ export function parseOrdersWorkbookBuffer(bytes, fileName = "pedidos-importados.
     ["23441", "Carangola"], ["24064", "Aimorés"],
   ]);
   const resellerRoles = new Set(["bronze", "cobre", "diamante", "diamante gb", "esmeralda gb", "ouro", "platina", "prata", "rubi", "revendedor"]);
-  const numeric = (value) => {
-    if (typeof value === "number" && Number.isFinite(value)) return value;
-    const text = String(value ?? "").trim().replace(/\s/g, "").replace(/\./g, "").replace(",", ".");
-    const parsed = Number(text);
-    return Number.isFinite(parsed) ? parsed : 0;
-  };
+  const numeric = (value) => orderNumber(value);
   const dateValue = (value) => {
     if (value instanceof Date && !Number.isNaN(value.valueOf())) return value.toISOString().slice(0, 10);
     const text = String(value ?? "");
