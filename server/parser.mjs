@@ -559,11 +559,21 @@ const aggregate = (rows, indicator) => {
 function quality(records, workbook, resolvedSheets) {
   const issues = [];
   const issueKeys = new Set();
+  const issueGuidance = {
+    missing_sheet: { impact: "O indicador não pode ser calculado.", resolution: "Inclua a aba esperada na planilha ou atualize o mapeamento da fonte." },
+    invalid_date: { impact: "O registro pode ficar fora do ciclo ou do período filtrado.", resolution: "Corrija a data na planilha e importe novamente." },
+    invalid_percent: { impact: "O resultado pode distorcer o ranking e o status da meta.", resolution: "Revise a unidade da coluna: percentual deve estar entre 0% e 100%." },
+    missing_store_code: { impact: "A loja pode não ser conciliada com pedidos e outras fontes.", resolution: "Preencha o código oficial da loja na origem." },
+    missing_value: { impact: "O indicador aparece sem resultado para a loja.", resolution: "Preencha o valor do indicador ou corrija a coluna de origem." },
+    duplicate_grain: { impact: "O resultado pode estar contado mais de uma vez.", resolution: "Remova duplicidades mantendo uma linha por loja, indicador, ciclo e data." },
+    corrected_store_identity: { impact: "O sistema normalizou a identificação antes de calcular.", resolution: "Padronize nome e código da loja na planilha para evitar correções automáticas." },
+  };
   const add = (severity, code, message, extra = {}) => {
     const key = [severity, code, message, extra.indicator || "", extra.store || "", extra.key || ""].join("|");
     if (issueKeys.has(key)) return;
     issueKeys.add(key);
-    issues.push({ severity, code, message, ...extra });
+    const guidance = issueGuidance[code] || { impact: "Pode afetar a confiabilidade do recorte analisado.", resolution: "Verifique o registro indicado na planilha e importe novamente após a correção." };
+    issues.push({ severity, code, message, status: "open", impact: guidance.impact, resolution: guidance.resolution, sourceSheet: extra.indicator ? resolvedSheets[extra.indicator] || null : null, ...extra });
   };
   INDICATORS.forEach((indicator) => {
     if (!resolvedSheets[indicator.id]) add("critical", "missing_sheet", `Aba não encontrada para ${indicator.label}`, { indicator: indicator.id });

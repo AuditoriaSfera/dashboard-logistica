@@ -48,7 +48,7 @@ type DashboardData = {
   indicators: Record<string, Indicator>;
   stores: Array<{ store: string; storeCode: string | null; indicators: Record<string, Result> }>;
   alerts: Array<Result & { store: string; storeCode?: string | null; indicator: string }>;
-  quality: { issues: Array<{ severity: string; code: string; message: string; indicator?: string }>; summary: Record<string, number> };
+  quality: { workbookSheets?: string[]; issues: Array<{ severity: string; code: string; message: string; indicator?: string; store?: string; sourceSheet?: string | null; impact?: string; resolution?: string; status?: string }>; summary: Record<string, number> };
   orders?: { error?: string; source: { fileName: string; modifiedAt: string; lastImportAt?: string }; period: { start: string | null; end: string | null; days: number }; stores: Array<{ store: string; storeCode: string; total: number; retirada: number; entrega: number; revendedor: number; omni: number; revendedorCategorias?: Record<string, number>; cancelamentoMotivos?: Record<string, [number, number]>; cancelamentoFiscal?: Record<string, [number, number]>; pctEntrega: number; pctRetirada: number; retiradaCancelados: number; entregaCancelados: number; itens: number; mediaRetirada: number; mediaEntrega: number; mediaOmni: number; mediaItens: number }>; daily?: Array<{ date: string; store: string; storeCode: string; total: number; retirada: number; entrega: number; revendedor: number; omni: number; retiradaCancelados: number; entregaCancelados: number; itens: number; revendedorCategorias?: Record<string, number>; cancelamentoMotivos?: Record<string, [number, number]>; cancelamentoFiscal?: Record<string, [number, number]> }>; records?: OrderRecord[] } | null;
 };
 
@@ -95,6 +95,11 @@ const formatDay = (value: string | null | undefined) => {
   const day = value.slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
   return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short" }).format(new Date(`${day}T00:00:00`));
+};
+const auditActionLabel: Record<string, string> = {
+  "session-start": "Entrou no dashboard", "session-heartbeat": "Sessão ativa", "session-end": "Saiu do dashboard",
+  "view-open": "Consultou menu", "orders-import": "Importou pedidos", "arruamento-import": "Importou arruamento",
+  "dashboard-import": "Importou dashboard", "dashboard-refresh": "Atualizou dashboard",
 };
 const platformPeriodLabel = (indicator: Indicator, selectedCycle: string) => {
   if (indicator.id !== "plataforma-logistica" || !indicator.records.length) return null;
@@ -703,10 +708,14 @@ function OrderRecurrenceView({ data, records, loading, error, selectedStore, cyc
 }
 
 function AuditView({ events, loading, error, onReload }: { events: AuditEvent[]; loading: boolean; error: string; onReload: () => void }) {
+  const sessions = events.filter((event) => event.action === "session-start");
+  const views = events.filter((event) => event.action === "view-open");
+  const lastHeartbeat = events.find((event) => event.action === "session-heartbeat");
   return <>
     <section className="page-head"><div><span className="eyebrow">Governança</span><h1>Auditoria de atividades</h1><p>Registro das alterações relevantes feitas no dashboard e no banco.</p></div><button className="refresh" type="button" onClick={onReload} disabled={loading}><RefreshCw className={loading ? "spin" : ""} size={16} />{loading ? "Atualizando…" : "Atualizar auditoria"}</button></section>
     {error && <p className="error-text" role="alert">{error}</p>}
-    <section className="panel audit-panel"><div className="section-title"><div><h2>Últimas atividades</h2><p>Retenção atual: últimos 200 eventos.</p></div><span className="table-hint">{events.length} eventos</span></div>{loading ? <p className="muted">Carregando registros…</p> : !events.length ? <p className="muted">Nenhum evento registrado ainda.</p> : <div className="table-wrap"><table className="audit-table"><thead><tr><th>Data</th><th>Usuário</th><th>Ação</th><th>Objeto</th><th>Detalhes</th></tr></thead><tbody>{events.map((event) => <tr key={event.id}><td>{shortDate.format(new Date(event.createdAt))}</td><td><strong>{event.actorName || "Sistema"}</strong><small>{event.actorEmail || "—"}</small></td><td><span className="audit-action">{event.action}</span></td><td>{event.entityType || "—"}{event.entityId ? <small>{event.entityId}</small> : null}</td><td>{Object.entries(event.metadata || {}).filter(([key]) => !["bytes"].includes(key)).map(([key, value]) => `${key}: ${String(value)}`).join(" · ") || "—"}</td></tr>)}</tbody></table></div>}</section>
+    <section className="summary-grid three audit-summary"><article><span>Entradas registradas</span><strong>{sessions.length}</strong><small>Login/sessão iniciada</small></article><article><span>Menus consultados</span><strong>{views.length}</strong><small>Navegações registradas</small></article><article><span>Última atividade</span><strong>{lastHeartbeat ? shortDate.format(new Date(lastHeartbeat.createdAt)) : "—"}</strong><small>{lastHeartbeat ? `${lastHeartbeat.actorName || "Usuário"} · sessão ativa` : "Sem heartbeat"}</small></article></section>
+    <section className="panel audit-panel"><div className="section-title"><div><h2>Últimas atividades</h2><p>Inclui entrada, saída, menus consultados, sessões e alterações administrativas.</p></div><span className="table-hint">{events.length} eventos</span></div>{loading ? <p className="muted">Carregando registros…</p> : !events.length ? <p className="muted">Nenhum evento registrado ainda.</p> : <div className="table-wrap"><table className="audit-table"><thead><tr><th>Data/hora</th><th>Usuário</th><th>Ação</th><th>Objeto</th><th>Detalhes</th></tr></thead><tbody>{events.map((event) => <tr key={event.id}><td>{shortDate.format(new Date(event.createdAt))}</td><td><strong>{event.actorName || "Sistema"}</strong><small>{event.actorEmail || "—"}</small></td><td><span className="audit-action">{auditActionLabel[event.action] || event.action}</span></td><td>{event.entityType || "—"}{event.entityId ? <small>{event.entityId}</small> : null}</td><td>{Object.entries(event.metadata || {}).filter(([key]) => !["bytes", "sessionId"].includes(key)).map(([key, value]) => `${key === "durationSeconds" ? "Duração (s)" : key}: ${String(value)}`).join(" · ") || "—"}</td></tr>)}</tbody></table></div>}</section>
   </>;
 }
 
@@ -752,10 +761,32 @@ export default function Home() {
   const sessionRevision = useRef(0);
   const sessionTransition = useRef(false);
   const [signingOut, setSigningOut] = useState(false);
+  const auditSessionId = useRef<string | null>(null);
+  const auditSessionStartedAt = useRef<number | null>(null);
   const [overviewRotation, setOverviewRotation] = useState(0);
   const [rotationPulse, setRotationPulse] = useState(false);
   const refreshWorkbookInput = useRef<HTMLInputElement>(null);
   const lastOverviewInteraction = useRef(Date.now());
+
+  const sendAuditEvent = useCallback((action: string, metadata: Record<string, unknown> = {}, keepalive = false) => {
+    if (!currentUser) return;
+    void fetch("/api/audit", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin", keepalive, body: JSON.stringify({ action, ...metadata, sessionId: auditSessionId.current, durationSeconds: auditSessionStartedAt.current ? (Date.now() - auditSessionStartedAt.current) / 1000 : undefined }) }).catch(() => {});
+  }, [currentUser?.id]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    auditSessionId.current = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+    auditSessionStartedAt.current = Date.now();
+    sendAuditEvent("session-start");
+    const heartbeat = window.setInterval(() => sendAuditEvent("session-heartbeat"), 60_000);
+    const end = () => sendAuditEvent("session-end", {}, true);
+    window.addEventListener("beforeunload", end);
+    return () => { window.clearInterval(heartbeat); window.removeEventListener("beforeunload", end); sendAuditEvent("session-end"); auditSessionId.current = null; auditSessionStartedAt.current = null; };
+  }, [currentUser?.id, sendAuditEvent]);
+
+  useEffect(() => {
+    if (currentUser && auditSessionId.current) sendAuditEvent("view-open", { view });
+  }, [view, currentUser?.id, sendAuditEvent]);
 
   useEffect(() => {
     if (view !== "overview") return;
@@ -805,6 +836,7 @@ export default function Home() {
     setSigningOut(true);
     const revision = ++sessionRevision.current;
     try {
+      sendAuditEvent("session-end", {}, true);
       await authRequest({ action: "logout" });
       if (revision !== sessionRevision.current) return;
       setCurrentUser(null); setData(null); setRecurrenceRecords([]); setView("overview"); setAuthError("");
@@ -1043,7 +1075,7 @@ export default function Home() {
             />
           )}
 
-          {view === "quality" && <><section className="page-head"><div><span className="eyebrow">Governança</span><h1>Qualidade dos Dados</h1><p>Problemas registrados sem interromper o restante do dashboard.</p></div></section><section className="summary-grid three"><article><span>Críticos</span><strong>{data.quality.summary.critical || 0}</strong></article><article><span>Altos</span><strong>{data.quality.summary.high || 0}</strong></article><article><span>Médios</span><strong>{data.quality.summary.medium || 0}</strong></article></section><section className="panel issue-list">{data.quality.issues.slice(0, 100).map((item, index) => <div key={index}><span className={`severity ${item.severity}`}>{item.severity}</span><strong>{item.message}</strong><small>{item.indicator ? data.indicators[item.indicator]?.label : item.code}</small></div>)}</section></>}
+          {view === "quality" && <><section className="page-head"><div><span className="eyebrow">Governança</span><h1>Qualidade dos Dados</h1><p>Diagnóstico claro da fonte: o que está errado, onde está, impacto, correção e status.</p></div><span className="data-chip">Fonte: {data.source.fileName}</span></section><section className="summary-grid four"><article><span>Críticos</span><strong>{data.quality.summary.critical || 0}</strong><small>Impedem cálculo confiável</small></article><article><span>Altos</span><strong>{data.quality.summary.high || 0}</strong><small>Podem distorcer resultados</small></article><article><span>Médios</span><strong>{data.quality.summary.medium || 0}</strong><small>Exigem correção planejada</small></article><article><span>Em aberto</span><strong>{data.quality.issues.filter((item) => item.status !== "resolved").length}</strong><small>Problemas ainda não resolvidos</small></article></section><section className="panel quality-source"><div className="section-title"><div><h2>Origem analisada</h2><p>Abas encontradas no último processamento.</p></div><span className="table-hint">{data.quality.workbookSheets?.length || 0} abas</span></div><div className="quality-sheet-list">{(data.quality.workbookSheets || []).map((sheet) => <span key={sheet}>{sheet}</span>)}</div></section><section className="panel quality-issues"><div className="section-title"><div><h2>Diagnóstico dos problemas</h2><p>Cada ocorrência informa o local, impacto, correção sugerida e status.</p></div><span className="table-hint">{data.quality.issues.length} ocorrências</span></div>{data.quality.issues.length ? <div className="quality-issue-list">{data.quality.issues.slice(0, 200).map((item, index) => <article className="quality-issue" key={`${item.code}-${item.message}-${index}`}><div className="quality-issue-head"><span className={`severity ${item.severity}`}>{item.severity}</span><span className={`quality-status ${item.status === "resolved" ? "resolved" : "open"}`}>{item.status === "resolved" ? "Resolvido" : "Em aberto"}</span><strong>{item.message}</strong></div><dl><div><dt>Problema</dt><dd>{item.code}</dd></div><div><dt>Aba / origem</dt><dd>{item.sourceSheet || (item.indicator ? data.indicators[item.indicator]?.label : "Planilha / estrutura")}</dd></div><div><dt>Impacto</dt><dd>{item.impact || "Pode afetar a confiabilidade do recorte."}</dd></div><div><dt>Como resolver</dt><dd>{item.resolution || "Verificar o registro na planilha e importar novamente."}</dd></div>{item.store && <div><dt>Loja afetada</dt><dd>{item.store}</dd></div>}</dl></article>)}</div> : <div className="quality-empty"><strong>Nenhum problema identificado</strong><p>A última leitura não encontrou inconsistências registradas.</p></div>}</section></>}
 
           {view === "audit" && currentUser.accountType === "admin" && <AuditView events={auditEvents} loading={auditLoading} error={auditError} onReload={() => void loadAudit()} />}
 
