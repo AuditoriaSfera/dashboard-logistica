@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { authorize } from "../../../../server/auth.mjs";
-import { clearOrderRecords, databaseConfigured, getSql, loadOrderRecordsFromDatabase, loadDashboardFromDatabase, logOrderImport, saveOrderRecords, saveOrdersSnapshotToDatabase } from "../../../../server/db.mjs";
+import { clearOrderRecords, databaseConfigured, getSql, loadOrderRecordsFromDatabase, loadDashboardFromDatabase, logAuditEvent, logOrderImport, saveOrderRecords, saveOrdersSnapshotToDatabase } from "../../../../server/db.mjs";
 import { parseOrdersWorkbookBuffer } from "../../../../server/parser.mjs";
 
 export const runtime = "nodejs";
@@ -124,6 +124,7 @@ export async function POST(request: Request) {
     const orders = imported.orders;
     await saveOrdersSnapshotToDatabase(sql, orders);
     await logOrderImport(sql, { fileName, recordCount: imported.imported, importedBy: null, note: replacesHistory ? `Snapshot anual; histórico anterior substituído. ${imported.ignored} duplicidades internas ignoradas.` : `Importação online; ${imported.ignored} duplicidades ignoradas.` });
+    await logAuditEvent(sql, { actor: access.user, action: "orders-import", entityType: "orders", entityId: fileName, request, metadata: { fileName, imported: imported.imported, ignoredDuplicates: imported.ignored, replacedHistory: replacesHistory, totalRecords: previousRecords.length + imported.imported } });
     return NextResponse.json({ ok: true, fileName, imported: imported.imported, ignoredDuplicates: imported.ignored, replacedHistory: replacesHistory, totalRecords: previousRecords.length + imported.imported, persisted: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Falha ao importar a planilha de pedidos.";

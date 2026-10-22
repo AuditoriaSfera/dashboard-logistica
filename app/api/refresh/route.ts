@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { NextResponse } from "next/server";
-import { GET as authGet } from "../auth/route";
-import { databaseConfigured, getSql, loadDashboardFromDatabase, loadSourceWorkbook, saveSnapshotToDatabase, saveSourceWorkbook } from "../../../server/db.mjs";
+import { authorize } from "../../../server/auth.mjs";
+import { databaseConfigured, getSql, loadDashboardFromDatabase, loadSourceWorkbook, logAuditEvent, saveSnapshotToDatabase, saveSourceWorkbook } from "../../../server/db.mjs";
 import { loadOneDriveWorkbook, oneDriveConfigured } from "../../../server/onedrive.mjs";
 import { parseWorkbook } from "../../../server/parser.mjs";
 
@@ -19,10 +19,10 @@ function dataDirectory() {
 }
 
 async function requireAdministrator(request: Request) {
-  const authUrl = new URL("/api/auth?action=users", request.url);
-  const authRequest = new Request(authUrl, { headers: { cookie: request.headers.get("cookie") || "" } });
-  const authResponse = await authGet(authRequest);
-  if (!authResponse.ok) throw new Error(authResponse.status === 401 ? "Entre novamente para atualizar os dados." : "Somente um administrador pode atualizar a planilha operacional.");
+  const access = await authorize(request);
+  if (access.error) throw new Error(access.error.status === 401 ? "Entre novamente para atualizar os dados." : "Somente um administrador pode atualizar a planilha operacional.");
+  if (access.user.accountType !== "admin") throw new Error("Somente um administrador pode atualizar a planilha operacional.");
+  return access.user;
 }
 
 function writeJsonAtomically(filePath: string, value: unknown) {
@@ -36,7 +36,7 @@ export async function POST(request: Request) {
   let uploaded = false;
   let connectedModifiedAt: string | null = null;
   try {
-    await requireAdministrator(request);
+    const admin = await requireAdministrator(request);
     const directory = dataDirectory();
     fs.mkdirSync(directory, { recursive: true });
     let sourceName = "Novas Premiações.xlsx";
@@ -129,6 +129,7 @@ export async function POST(request: Request) {
         throw new Error("A planilha foi lida, mas não foi possível gravar a atualização no banco de dados. A versão anterior foi mantida no dashboard.");
       }
     }
+    if (databaseConfigured()) await logAuditEvent(getSql(), { actor: admin, action: uploaded ? "dashboard-import" : "dashboard-refresh", entityType: "dashboard", entityId: safeName, request, metadata: { fileName: safeName, reusedSource: !uploaded, persisted } });
     return NextResponse.json({ ok: true, fileName: safeName, modifiedAt: snapshot.source.modifiedAt, persisted, connectedSource: Boolean(connectedModifiedAt), reusedSource: !uploaded });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Falha ao atualizar a planilha operacional.";

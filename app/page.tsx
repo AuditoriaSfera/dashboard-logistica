@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertTriangle, BarChart3, Building2, ChevronRight, CircleGauge, Database,
+  AlertTriangle, BarChart3, Building2, ChevronRight, CircleGauge, ClipboardList, Database,
   Download, FileSpreadsheet, LayoutDashboard, Menu, RefreshCw, Settings, Store, Trophy, Upload, UserCircle, Users, X,
 } from "lucide-react";
 import {
@@ -64,6 +64,7 @@ type OrderRecord = {
   date: string | null;
   canceled?: boolean;
 };
+type AuditEvent = { id: string; createdAt: string; actorName?: string | null; actorEmail?: string | null; action: string; entityType?: string | null; entityId?: string | null; metadata: Record<string, unknown> };
 
 const percent = new Intl.NumberFormat("pt-BR", { style: "percent", maximumFractionDigits: 2 });
 // Contagens de pedidos/itens são sempre inteiras; a média diária continua
@@ -114,6 +115,14 @@ function ResultValue({ result, id }: { result: Result | null | undefined; id: st
 }
 const formatTarget = (id: string, value: number | null) => isWithdrawal(id) ? "3 Pedidos" : id === "trilogo" ? `${integer.format(value ?? 2)} Chamados` : formatValue(value, id);
 const normalizeText = (value: unknown) => String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+const csvCell = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+function downloadCsv(fileName: string, headers: string[], rows: unknown[][]) {
+  const csv = [headers, ...rows].map((row) => row.map(csvCell).join(";")).join("\r\n");
+  const blob = new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a"); link.href = url; link.download = fileName; link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 const matchesStores = (selected: string[] | string, store: string) => {
   const values = Array.isArray(selected) ? selected : selected ? [selected] : [];
   return values.length === 0 || values.includes(store);
@@ -644,12 +653,13 @@ function OrdersView({ data, selectedStore, cycle, startDate, endDate, onImported
   const displayEntrega = displayOrderTotal - displayRetirada;
   const MetricCard = ({ title, value, average, share }: { title: string; value: number; average: number; share?: number }) => <article className="order-group-card"><h3>{title}</h3><strong>{integer.format(value)}</strong><div className="order-card-stats compact">{share != null && <span><small>Participação no total</small><b>{percent.format(share)}</b></span>}<span><small>Média por dia</small><b>{average.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}</b></span></div><p>{scope}</p></article>;
 
+  const exportRows = rows.filter((r) => r.storeCode !== "21732");
   return <>
-    <section className="page-head"><div><span className="eyebrow">Pedidos</span><h1>Indicadores de pedidos</h1>{orders.source.lastImportAt && <p>Última importação: {new Date(orders.source.lastImportAt).toLocaleString("pt-BR")}</p>}{uploadError && <p className="error-text" role="alert">{uploadError}</p>}</div><label className="refresh upload-button"><input type="file" accept=".xlsx,.xls,.csv" onChange={importFile} disabled={uploading} />{uploading ? "Importando…" : "Importar planilha"}</label></section>
+    <section className="page-head"><div><span className="eyebrow">Pedidos</span><h1>Indicadores de pedidos</h1>{orders.source.lastImportAt && <p>Última importação: {new Date(orders.source.lastImportAt).toLocaleString("pt-BR")}</p>}{uploadError && <p className="error-text" role="alert">{uploadError}</p>}</div><div className="page-head-actions"><button className="refresh" type="button" onClick={() => downloadCsv("pedidos-filtrados.csv", ["Loja", "Código", "Total", "Retirada", "Entrega", "Revendedor", "OMNI", "% entrega", "% retirada", "Retirada cancelados", "Entrega cancelados", "Itens"], exportRows.map((r) => [r.store, r.storeCode, r.total, r.retirada, r.entrega, r.revendedor, r.omni, r.pctEntrega, r.pctRetirada, r.retiradaCancelados, r.entregaCancelados, r.itens]))}><Download size={16} />Exportar resultados</button><label className="refresh upload-button"><input type="file" accept=".xlsx,.xls,.csv" onChange={importFile} disabled={uploading} />{uploading ? "Importando…" : "Importar planilha"}</label></div></section>
     <section className="order-section"><h2>Tipo de entrega</h2><div className="order-groups order-three"><MetricCard title="Pedidos de retirada" value={displayRetirada} share={orderTotal ? totals.retirada / orderTotal : 0} average={displayRetirada / days} /><MetricCard title="Pedidos de entrega" value={displayEntrega} share={orderTotal ? totals.entrega / orderTotal : 0} average={displayEntrega / days} /><article className="order-group-card order-total-card"><h3>Total de pedidos</h3><strong>{integer.format(displayOrderTotal)}</strong><div className="order-card-stats compact"><span><small>Média por dia</small><b>{(displayOrderTotal / days).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}</b></span></div><p>Retirada + entrega, sem cancelados · {scope}</p></article></div></section>
     <section className="order-section"><h2>Perfil do pedido</h2><div className="order-groups profile-groups"><article className="order-group-card omni-card"><h3>Pedidos de OMNI</h3><strong>{integer.format(totals.omni)}</strong><div className="order-card-stats compact"><span><small>Participação no total</small><b>{percent.format(orderTotal ? totals.omni / orderTotal : 0)}</b></span><span><small>Média por dia</small><b>{(totals.omni / days).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}</b></span></div><div className="items-inline"><h4>Itens</h4><strong>{integer.format(totals.itens)}</strong><div className="order-card-stats compact"><span><small>Média por loja</small><b>{(totals.itens / Math.max(1, rows.length)).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}</b></span><span><small>Média por dia</small><b>{(totals.itens / days).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}</b></span></div></div><p>{scope}</p></article><article className="order-group-card reseller-card"><h3>Pedidos de revendedor</h3><strong>{integer.format(totals.revendedor)}</strong><div className="order-card-stats compact"><span><small>Participação no total</small><b>{percent.format(orderTotal ? totals.revendedor / orderTotal : 0)}</b></span><span><small>Média por dia</small><b>{(totals.revendedor / days).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}</b></span></div><div className="reseller-breakdown"><h4>Participação por categoria</h4><div>{resellerBreakdown.map((category) => <span key={category.key}><small>{category.label}</small><b>{integer.format(category.value)}</b><em>{percent.format(totals.revendedor ? category.value / totals.revendedor : 0)}</em></span>)}</div></div><p>{scope}</p></article></div></section>
     <section className="order-section"><article className="order-group-card cancellation-card"><h3>Pedidos cancelados</h3><div className="order-card-stats cancellation-summary"><span><small>Entrega</small><b>{integer.format(totals.entregaCancelados)}</b></span><span><small>Retirada</small><b>{integer.format(totals.retiradaCancelados)}</b></span><span><small>Total</small><b>{integer.format(totals.retiradaCancelados + totals.entregaCancelados)}</b></span></div><div className="cancellation-breakdown"><div className="breakdown-head"><h4>Detalhamento por motivo</h4><strong>{integer.format(cancellationReasonTotal)} cancelados</strong></div><div className="cancellation-table"><div className="cancellation-row header"><span>Motivo</span><span>Resultado</span><span>Participação do total</span></div>{cancellationBreakdown.map((reason) => <div className="cancellation-row" key={reason.key}><strong>{reason.label}</strong><b>{integer.format(reason.total)}</b><em>{percent.format(cancellationReasonTotal ? reason.total / cancellationReasonTotal : 0)}</em></div>)}</div></div><div className="fiscal-breakdown"><div className="breakdown-head"><h4>Situação fiscal dos pedidos cancelados</h4><strong>{integer.format(fiscalTotal)} pedidos</strong></div><div className="cancellation-table fiscal-table"><div className="cancellation-row header"><span>Situação fiscal</span><span>Resultado</span><span>Participação do total</span></div>{fiscalBreakdown.map((item) => <div className="cancellation-row" key={item.key}><strong>{item.label}</strong><b>{integer.format(item.total)}</b><em>{percent.format(fiscalTotal ? item.total / fiscalTotal : 0)}</em></div>)}</div></div><p>{scope}</p></article></section>
-    <section className="panel orders-results-panel"><div className="section-title"><div><h2>Resultados por loja</h2><p>Comparativo detalhado, ordenado pelo total de pedidos.</p></div><span className="table-hint">Deslize para ver todas as colunas</span></div><div className="table-wrap orders-table-wrap"><table className="orders-table"><thead><tr className="group-row"><th rowSpan={2}>Loja / código</th><th colSpan={5}>Pedidos por canal</th><th colSpan={2}>Participação</th><th colSpan={2}>Cancelados</th><th rowSpan={2}>Itens</th></tr><tr><th>Total</th><th>Retirada</th><th>Entrega</th><th>Revendedor</th><th>OMNI</th><th>% entrega</th><th>% retirada</th><th>Retirada</th><th>Entrega</th></tr></thead><tbody>{rows.filter((r) => r.storeCode !== "21732").map((r) => <tr key={r.store}><th className="store-cell"><strong>{r.store}</strong><small>{r.storeCode || "—"}</small></th><td className="emphasis-cell">{integer.format(r.total)}</td><td>{integer.format(r.retirada)}</td><td>{integer.format(r.entrega)}</td><td>{integer.format(r.revendedor)}</td><td>{integer.format(r.omni)}</td><td className="percent-cell">{percent.format(r.pctEntrega)}</td><td className="percent-cell">{percent.format(r.pctRetirada)}</td><td>{integer.format(r.retiradaCancelados)}</td><td>{integer.format(r.entregaCancelados)}</td><td>{integer.format(r.itens)}</td></tr>)}</tbody></table></div></section>
+    <section className="panel orders-results-panel"><div className="section-title"><div><h2>Resultados por loja</h2><p>Comparativo detalhado, ordenado pelo total de pedidos.</p></div><span className="table-hint">Deslize para ver todas as colunas</span></div><div className="table-wrap orders-table-wrap"><table className="orders-table"><thead><tr className="group-row"><th rowSpan={2}>Loja / código</th><th colSpan={5}>Pedidos por canal</th><th colSpan={2}>Participação</th><th colSpan={2}>Cancelados</th><th rowSpan={2}>Itens</th></tr><tr><th>Total</th><th>Retirada</th><th>Entrega</th><th>Revendedor</th><th>OMNI</th><th>% entrega</th><th>% retirada</th><th>Retirada</th><th>Entrega</th></tr></thead><tbody>{exportRows.map((r) => <tr key={r.store}><th className="store-cell"><strong>{r.store}</strong><small>{r.storeCode || "—"}</small></th><td className="emphasis-cell">{integer.format(r.total)}</td><td>{integer.format(r.retirada)}</td><td>{integer.format(r.entrega)}</td><td>{integer.format(r.revendedor)}</td><td>{integer.format(r.omni)}</td><td className="percent-cell">{percent.format(r.pctEntrega)}</td><td className="percent-cell">{percent.format(r.pctRetirada)}</td><td>{integer.format(r.retiradaCancelados)}</td><td>{integer.format(r.entregaCancelados)}</td><td>{integer.format(r.itens)}</td></tr>)}</tbody></table></div></section>
   </>;
 }
 
@@ -683,11 +693,31 @@ function OrderRecurrenceView({ data, records, loading, error, selectedStore, cyc
   useEffect(() => { setPage(0); setExpanded(null); }, [selectedStore, cycle, startDate, endDate, city, name, countOrder, valueOrder]);
   const totalValue = filtered.reduce((sum, item) => sum + Number(item.value || 0), 0);
   const period = effectiveStart || effectiveEnd ? `${formatDay(effectiveStart) || "início"} a ${formatDay(effectiveEnd) || "fim"}` : "Toda a planilha acumulada";
+  const exportRanking = () => downloadCsv("recorrencia-filtrada.csv", ["Revendedor", "Canal", "Papel", "Cidade", "Valor total", "Pedidos"], ranking.map((person) => [person.reseller, person.channel, person.role, person.city, person.totalValue, person.count]));
   return <>
     <section className="page-head"><div><span className="eyebrow">Pedidos</span><h1>Recorrência de pedidos</h1><p>Ranking de revendedores no período selecionado. Cada importação semanal é somada ao histórico anterior.</p></div><span className="data-chip">{cycle ? `Ciclo ${cycle} · ` : ""}{selectedStore.length ? selectedStore.join(", ") : "Todas as lojas"} · {period}</span></section>
     <section className="panel recurrence-filters"><div className="section-title"><div><h2>Filtros da recorrência</h2><p>Sem filtro de data, o ranking considera toda a planilha acumulada.</p></div><span className="table-hint">Cancelados não entram na contagem</span></div><div className="recurrence-filter-grid"><label>Revendedor<input value={name} onChange={(event) => setName(event.target.value)} placeholder="Buscar por nome" /></label><label>Cidade<MultiSelectPopover selected={city} onChange={setCity} placeholder="Todas as cidades" options={cities.map((item) => ({ value: item, label: item }))} /></label><label>Pedidos<select value={countOrder} onChange={(event) => setCountOrder(event.target.value as "desc" | "asc")}><option value="desc">Mais pedidos primeiro</option><option value="asc">Menos pedidos primeiro</option></select></label><label>Valor gasto<select value={valueOrder} onChange={(event) => setValueOrder(event.target.value as "none" | "desc" | "asc")}><option value="none">Sem ordenar por valor</option><option value="desc">Mais caro primeiro</option><option value="asc">Mais barato primeiro</option></select></label></div></section>
     <section className="summary-grid three recurrence-summary"><article><span>Pessoas no ranking</span><strong>{integer.format(ranking.length)}</strong><small>Após filtros</small></article><article><span>Pedidos no período</span><strong>{integer.format(filtered.length)}</strong><small>Importações acumuladas</small></article><article><span>Valor total</span><strong>{totalValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</strong><small>Pedidos não cancelados</small></article></section>
-    <section className="panel recurrence-panel"><div className="section-title"><div><h2>Ranking de recorrência</h2><p>Selecione uma pessoa para abrir os pedidos individualmente.</p></div><span className="table-hint">{loading ? "Carregando pedidos…" : `${integer.format(ranking.length)} resultados`}</span></div>{loading ? <div className="recurrence-empty"><RefreshCw className="spin" size={24} /><strong>Carregando pedidos detalhados</strong><p>A planilha foi importada; preparando o ranking.</p></div> : error ? <div className="recurrence-empty"><Database size={24} /><strong>Não foi possível carregar os pedidos</strong><p>{error}</p></div> : !records.length ? <div className="recurrence-empty"><Users size={24} /><strong>Importe a primeira planilha semanal</strong><p>Quando a planilha de pedidos for importada, os novos registros serão adicionados ao histórico e aparecerão neste ranking.</p></div> : !ranking.length ? <p className="muted">Nenhum pedido encontrado para os filtros selecionados.</p> : <><div className="table-wrap recurrence-table-wrap"><table className="recurrence-table"><thead><tr><th>Revendedor</th><th>Canal de distribuição</th><th>Papel</th><th>Cidade</th><th>Total gasto</th><th>Pedidos</th><th aria-label="Detalhes" /></tr></thead><tbody>{visibleRanking.map((person) => <><tr key={person.reseller} className={expanded === person.reseller ? "is-expanded" : ""} onClick={() => setExpanded(expanded === person.reseller ? null : person.reseller)}><th><strong>{person.reseller}</strong></th><td>{person.channel}</td><td>{person.role}</td><td>{person.city}</td><td className="emphasis-cell">{person.totalValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</td><td className="emphasis-cell">{integer.format(person.count)}</td><td><ChevronRight size={16} className={expanded === person.reseller ? "rotate-90" : ""} /></td></tr>{expanded === person.reseller && <tr className="recurrence-details-row"><td colSpan={7}><div className="recurrence-details"><strong>Pedidos de {person.reseller}</strong><table><thead><tr><th>Código do pedido</th><th>Data de captação</th><th>Valor</th></tr></thead><tbody>{person.orders.map((order) => <tr key={`${person.reseller}-${order.orderCode}-${order.date}`}><td>{order.orderCode}</td><td>{formatDay(order.date) || "—"}</td><td>{Number(order.value || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</td></tr>)}</tbody></table></div></td></tr>}</>)}</tbody></table></div><div className="recurrence-pagination"><button type="button" disabled={page === 0} onClick={() => setPage((current) => Math.max(0, current - 1))}>Anterior</button><span>Página {page + 1} de {pageCount}</span><button type="button" disabled={page >= pageCount - 1} onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}>Próxima</button></div></>}</section>
+    <section className="panel recurrence-panel"><div className="section-title"><div><h2>Ranking de recorrência</h2><p>Selecione uma pessoa para abrir os pedidos individualmente.</p></div><div className="section-title-actions"><button className="refresh" type="button" onClick={exportRanking} disabled={!ranking.length}><Download size={16} />Exportar resultados</button><span className="table-hint">{loading ? "Carregando pedidos…" : `${integer.format(ranking.length)} resultados`}</span></div></div>{loading ? <div className="recurrence-empty"><RefreshCw className="spin" size={24} /><strong>Carregando pedidos detalhados</strong><p>A planilha foi importada; preparando o ranking.</p></div> : error ? <div className="recurrence-empty"><Database size={24} /><strong>Não foi possível carregar os pedidos</strong><p>{error}</p></div> : !records.length ? <div className="recurrence-empty"><Users size={24} /><strong>Importe a primeira planilha semanal</strong><p>Quando a planilha de pedidos for importada, os novos registros serão adicionados ao histórico e aparecerão neste ranking.</p></div> : !ranking.length ? <p className="muted">Nenhum pedido encontrado para os filtros selecionados.</p> : <><div className="table-wrap recurrence-table-wrap"><table className="recurrence-table"><thead><tr><th>Revendedor</th><th>Canal de distribuição</th><th>Papel</th><th>Cidade</th><th>Total gasto</th><th>Pedidos</th><th aria-label="Detalhes" /></tr></thead><tbody>{visibleRanking.map((person) => <><tr key={person.reseller} className={expanded === person.reseller ? "is-expanded" : ""} onClick={() => setExpanded(expanded === person.reseller ? null : person.reseller)}><th><strong>{person.reseller}</strong></th><td>{person.channel}</td><td>{person.role}</td><td>{person.city}</td><td className="emphasis-cell">{person.totalValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</td><td className="emphasis-cell">{integer.format(person.count)}</td><td><ChevronRight size={16} className={expanded === person.reseller ? "rotate-90" : ""} /></td></tr>{expanded === person.reseller && <tr className="recurrence-details-row"><td colSpan={7}><div className="recurrence-details"><strong>Pedidos de {person.reseller}</strong><table><thead><tr><th>Código do pedido</th><th>Data de captação</th><th>Valor</th></tr></thead><tbody>{person.orders.map((order) => <tr key={`${person.reseller}-${order.orderCode}-${order.date}`}><td>{order.orderCode}</td><td>{formatDay(order.date) || "—"}</td><td>{Number(order.value || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</td></tr>)}</tbody></table></div></td></tr>}</>)}</tbody></table></div><div className="recurrence-pagination"><button type="button" disabled={page === 0} onClick={() => setPage((current) => Math.max(0, current - 1))}>Anterior</button><span>Página {page + 1} de {pageCount}</span><button type="button" disabled={page >= pageCount - 1} onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}>Próxima</button></div></>}</section>
+  </>;
+}
+
+const actionGuidance: Record<string, string> = {
+  "pec-omni": "Validar atendimento e disponibilidade no canal OMNI.",
+  medallia: "Revisar as reclamações e o plano de recuperação da loja.",
+  "plataforma-logistica": "Conferir pendências de separação, expedição e transporte.",
+  recebimento: "Verificar NFs atrasadas e alinhar a causa com a operação.",
+  arruamento: "Revisar o arruamento da loja e registrar os produtos faltantes.",
+  retirada: "Atacar pedidos em atraso e a capacidade de retirada.",
+  trilogo: "Revisar chamados abertos e o tempo de solução.",
+  "quebra-estoque": "Conferir divergências de estoque e a causa raiz.",
+};
+
+function AuditView({ events, loading, error, onReload }: { events: AuditEvent[]; loading: boolean; error: string; onReload: () => void }) {
+  return <>
+    <section className="page-head"><div><span className="eyebrow">Governança</span><h1>Auditoria de atividades</h1><p>Registro das alterações relevantes feitas no dashboard e no banco.</p></div><button className="refresh" type="button" onClick={onReload} disabled={loading}><RefreshCw className={loading ? "spin" : ""} size={16} />{loading ? "Atualizando…" : "Atualizar auditoria"}</button></section>
+    {error && <p className="error-text" role="alert">{error}</p>}
+    <section className="panel audit-panel"><div className="section-title"><div><h2>Últimas atividades</h2><p>Retenção atual: últimos 200 eventos.</p></div><span className="table-hint">{events.length} eventos</span></div>{loading ? <p className="muted">Carregando registros…</p> : !events.length ? <p className="muted">Nenhum evento registrado ainda.</p> : <div className="table-wrap"><table className="audit-table"><thead><tr><th>Data</th><th>Usuário</th><th>Ação</th><th>Objeto</th><th>Detalhes</th></tr></thead><tbody>{events.map((event) => <tr key={event.id}><td>{shortDate.format(new Date(event.createdAt))}</td><td><strong>{event.actorName || "Sistema"}</strong><small>{event.actorEmail || "—"}</small></td><td><span className="audit-action">{event.action}</span></td><td>{event.entityType || "—"}{event.entityId ? <small>{event.entityId}</small> : null}</td><td>{Object.entries(event.metadata || {}).filter(([key]) => !["bytes"].includes(key)).map(([key, value]) => `${key}: ${String(value)}`).join(" · ") || "—"}</td></tr>)}</tbody></table></div>}</section>
   </>;
 }
 
@@ -703,6 +733,9 @@ export default function Home() {
   const [recurrenceRecords, setRecurrenceRecords] = useState<OrderRecord[]>([]);
   const [recurrenceLoading, setRecurrenceLoading] = useState(false);
   const [recurrenceError, setRecurrenceError] = useState("");
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState("");
   const [error, setError] = useState("");
   const [sourceWarning, setSourceWarning] = useState("");
   // X-Data-Source (rota /api/dashboard): avisa quando o banco está configurado mas os dados vieram dos arquivos antigos.
@@ -723,7 +756,7 @@ export default function Home() {
   const [activeStore, setActiveStore] = useState("");
   const [currentUser, setCurrentUser] = useState<AccessUser | null>(null);
   useEffect(() => {
-    if (currentUser && currentUser.accountType !== "admin" && ["performance", "recurrence", "quality", "cadastro", "settings"].includes(view)) setView("overview");
+    if (currentUser && currentUser.accountType !== "admin" && ["performance", "recurrence", "quality", "cadastro", "settings", "audit"].includes(view)) setView("overview");
   }, [currentUser, view]);
   const [authError, setAuthError] = useState("");
   const [authReady, setAuthReady] = useState(false);
@@ -810,6 +843,18 @@ export default function Home() {
     } finally { setRefreshing(false); }
   }, []);
 
+  const loadAudit = useCallback(async () => {
+    if (currentUser?.accountType !== "admin") return;
+    setAuditLoading(true); setAuditError("");
+    try {
+      const response = await fetch("/api/audit?limit=200", { cache: "no-store" });
+      const body = await response.json() as { events?: AuditEvent[]; error?: string };
+      if (!response.ok) throw new Error(body.error || "Não foi possível carregar a auditoria.");
+      setAuditEvents(Array.isArray(body.events) ? body.events : []);
+    } catch (caught) { setAuditError(caught instanceof Error ? caught.message : "Falha ao carregar a auditoria."); }
+    finally { setAuditLoading(false); }
+  }, [currentUser?.accountType]);
+
   const uploadWorkbook = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -856,6 +901,8 @@ export default function Home() {
     return () => { cancelled = true; };
   }, [view, data, recurrenceRecords.length]);
 
+  useEffect(() => { if (view === "audit") void loadAudit(); }, [view, loadAudit]);
+
   const workingData = useMemo(() => {
     if (!data) return null;
     const storeEntries = (store.length ? data.stores.filter((item) => store.includes(item.store)) : data.stores)
@@ -890,7 +937,9 @@ export default function Home() {
         const gap = item.value != null && item.target != null
           ? metric.direction === "lower" ? item.value - item.target : item.target - item.value
           : 0;
-        return { ...item, gap };
+        const gapMagnitude = Math.abs(gap);
+        const critical = COUNT_INDICATORS.has(item.indicator) ? gapMagnitude >= 3 : gapMagnitude >= 0.05;
+        return { ...item, gap, priority: critical ? "Crítica" : "Alta", guidance: actionGuidance[item.indicator] || "Abrir a visão da loja e definir o responsável pela correção." };
       })
       .sort((a, b) => b.gap - a.gap || a.store.localeCompare(b.store, "pt-BR"))
       .slice(0, 8);
@@ -920,9 +969,9 @@ export default function Home() {
     const nav = [
     ["overview", "Visão Geral", LayoutDashboard], ["stores", "360° Por Loja", Store],
     ["ranking", "Ranking", Trophy], ["performance", "Pedidos", CircleGauge], ["recurrence", "Recorrência", Users],
-    ["quality", "Qualidade dos dados", Database], ["cadastro", "Usuários", Users], ["profile", "Meu perfil", UserCircle], ["settings", "Configurações", Settings],
+    ["quality", "Qualidade dos dados", Database], ["cadastro", "Usuários", Users], ["profile", "Meu perfil", UserCircle], ["settings", "Configurações", Settings], ["audit", "Auditoria", ClipboardList],
   ] as const;
-    const restrictedViews = new Set(["performance", "recurrence", "quality", "cadastro", "settings"]);
+    const restrictedViews = new Set(["performance", "recurrence", "quality", "cadastro", "settings", "audit"]);
 
   if (!authReady) return <main className="fatal"><RefreshCw className="spin" size={36} /><h1>Preparando acesso</h1></main>;
   if (authError && !currentUser) return <main className="fatal"><h1>Não foi possível verificar o acesso</h1><p>{authError}</p><button onClick={() => void refreshSession()}>Tentar novamente</button></main>;
@@ -990,7 +1039,7 @@ export default function Home() {
 
           {view === "stores" && <><section className="page-head"><div><span className="eyebrow">Lojas</span><h1>Visão 360° por loja</h1><p>Selecione uma unidade para detalhar sua operação.</p></div></section><div className="store-grid">{workingData.stores.map((item) => <button key={item.store} onClick={() => openStore(item.store)}><Store /><strong>{item.store}</strong><small className="store-code">{item.storeCode}</small><span>{Object.values(item.indicators).filter((result) => result.status === "bad").length} pontos de atenção</span><ChevronRight /></button>)}</div></>}
 
-          {view === "ranking" && <><section className="page-head"><div><span className="eyebrow">Benchmark interno</span><h1>Ranking de Lojas</h1><p>Melhores e piores resultados por indicador.</p></div></section><article className="panel attention ranking-priority-card"><div className="section-title"><div><h2>Prioridade de ação</h2><p>Ocorrências fora da meta, ordenadas pelo maior desvio.</p></div></div><div className="alert-list">{priorityAlerts.map((item, index) => <button key={`${item.store}-${item.indicator}-${index}`} onClick={() => openStore(item.store)}><AlertTriangle size={17} /><span><strong>{item.store} <small>{item.storeCode}</small></strong><small>{workingData.indicators[item.indicator]?.label} • {formatResult(item, item.indicator)} • {formatGap(item.gap, item.indicator)}</small></span><ChevronRight size={16} /></button>)}{!priorityAlerts.length && <p className="muted">Nenhuma ocorrência crítica calculável.</p>}</div></article><div className="indicator-panels">{filteredIndicators.map((item) => <article className="panel" key={item.id}><h2>{item.label}</h2><Ranking indicator={item} onStore={openStore} /></article>)}</div></>}
+          {view === "ranking" && <><section className="page-head"><div><span className="eyebrow">Benchmark interno</span><h1>Ranking de Lojas</h1><p>Melhores e piores resultados por indicador.</p></div><span className="data-chip">{priorityAlerts.length} ações priorizadas</span></section><article className="panel attention ranking-priority-card"><div className="section-title"><div><h2>Fila de ações prioritárias</h2><p>Ocorrências fora da meta, ordenadas pelo maior desvio. Clique para abrir a loja.</p></div><span className="table-hint">Prioridade calculada pelo desvio</span></div><div className="alert-list">{priorityAlerts.map((item, index) => <button key={`${item.store}-${item.indicator}-${index}`} onClick={() => openStore(item.store)}><AlertTriangle size={17} /><span><strong>{item.store} <small>{item.storeCode}</small><em className={`priority-label ${item.priority === "Crítica" ? "critical" : "high"}`}>{item.priority}</em></strong><small>{workingData.indicators[item.indicator]?.label} • {formatResult(item, item.indicator)} • {formatGap(item.gap, item.indicator)}</small><small className="action-guidance">Próxima ação: {item.guidance}</small></span><ChevronRight size={16} /></button>)}{!priorityAlerts.length && <p className="muted">Nenhuma ocorrência crítica calculável.</p>}</div></article><div className="indicator-panels">{filteredIndicators.map((item) => <article className="panel" key={item.id}><h2>{item.label}</h2><Ranking indicator={item} onStore={openStore} /></article>)}</div></>}
 
           {view === "performance" && <OrdersView data={data} selectedStore={store} cycle={cycle} startDate={startDate} endDate={endDate} onImported={() => load(true)} />}
 
@@ -1008,6 +1057,8 @@ export default function Home() {
           )}
 
           {view === "quality" && <><section className="page-head"><div><span className="eyebrow">Governança</span><h1>Qualidade dos Dados</h1><p>Problemas registrados sem interromper o restante do dashboard.</p></div></section><section className="summary-grid three"><article><span>Críticos</span><strong>{data.quality.summary.critical || 0}</strong></article><article><span>Altos</span><strong>{data.quality.summary.high || 0}</strong></article><article><span>Médios</span><strong>{data.quality.summary.medium || 0}</strong></article></section><section className="panel issue-list">{data.quality.issues.slice(0, 100).map((item, index) => <div key={index}><span className={`severity ${item.severity}`}>{item.severity}</span><strong>{item.message}</strong><small>{item.indicator ? data.indicators[item.indicator]?.label : item.code}</small></div>)}</section></>}
+
+          {view === "audit" && currentUser.accountType === "admin" && <AuditView events={auditEvents} loading={auditLoading} error={auditError} onReload={() => void loadAudit()} />}
 
           {view === "cadastro" && currentUser.accountType === "admin" && <CadastroView stores={data.stores.map(({ store, storeCode }) => ({ store, storeCode }))} currentUser={currentUser} onSessionChange={refreshSession} />}
 

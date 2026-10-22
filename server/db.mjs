@@ -338,6 +338,33 @@ export async function logOrderImport(sql, { fileName, recordCount, importedBy, n
   await sql`insert into public.order_imports (file_name, record_count, imported_by, note) values (${fileName}, ${recordCount ?? null}, ${importedBy}, ${note})`;
 }
 
+/** @param {{ actor?: object, action: string, entityType?: string | null, entityId?: string | null, metadata?: object, request?: Request | null }} input */
+export async function logAuditEvent(sql, { actor, action, entityType, entityId, metadata, request }) {
+  await ensureSchema(sql);
+  const actorUser = actor || {};
+  const ipAddress = request?.headers?.get("x-forwarded-for")?.split(",")[0]?.trim() || request?.headers?.get("x-real-ip") || null;
+  const userAgent = request?.headers?.get("user-agent") || null;
+  await sql`
+    insert into public.audit_events
+      (actor_user_id, actor_name, actor_email, action, entity_type, entity_id, metadata, ip_address, user_agent)
+    values
+      (${actorUser.id || null}, ${actorUser.name || null}, ${actorUser.email || null}, ${action}, ${entityType || null}, ${entityId || null}, ${sql.json(metadata || {})}, ${ipAddress}, ${userAgent})`;
+}
+
+export async function loadAuditEvents(sql, limit = 200) {
+  await ensureSchema(sql);
+  const safeLimit = Math.min(500, Math.max(1, Number(limit) || 200));
+  const rows = await sql`
+    select id, created_at, actor_user_id, actor_name, actor_email, action, entity_type, entity_id, metadata
+    from public.audit_events order by created_at desc limit ${safeLimit}`;
+  return rows.map((row) => ({
+    id: String(row.id), createdAt: row.created_at?.toISOString?.() ?? String(row.created_at),
+    actorUserId: row.actor_user_id, actorName: row.actor_name, actorEmail: row.actor_email,
+    action: row.action, entityType: row.entity_type, entityId: row.entity_id,
+    metadata: row.metadata || {},
+  }));
+}
+
 /** Grava o resultado completo de um refresh/importação (snapshot + resumo + registros detalhados). */
 export async function syncDashboardToDatabase(sql, snapshot) {
   await saveSnapshotToDatabase(sql, { snapshot, orders: snapshot.orders });

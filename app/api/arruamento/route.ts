@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { authorize } from "../../../server/auth.mjs";
-import { databaseConfigured, getSql, loadArruamentoWorkbook, loadArruamentoWorkbookMeta, saveArruamentoWorkbook } from "../../../server/db.mjs";
+import { databaseConfigured, getSql, loadArruamentoWorkbook, loadArruamentoWorkbookMeta, logAuditEvent, saveArruamentoWorkbook } from "../../../server/db.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -63,6 +63,9 @@ export async function POST(request: Request) {
   if (!file.size || file.size > MAX_BYTES) return NextResponse.json({ error: "A planilha está vazia ou excede o limite de 100 MB." }, { status: 413 });
   const storeCode = new URL(request.url).searchParams.get("storeCode")?.trim() || null;
   const fileName = file.name.replace(/[^\p{L}\p{N}._ -]/gu, "_");
-  await saveArruamentoWorkbook(getSql(), { store: current.store, storeCode: storeCode ?? undefined, cycle: selected.cycle, fileName, bytes: Buffer.from(await file.arrayBuffer()) });
+  const sql = getSql();
+  const bytes = Buffer.from(await file.arrayBuffer());
+  await saveArruamentoWorkbook(sql, { store: current.store, storeCode: storeCode ?? undefined, cycle: selected.cycle, fileName, bytes });
+  await logAuditEvent(sql, { actor: current.user, action: "arruamento-import", entityType: "arruamento-workbook", entityId: `${current.store}:${selected.cycle}`, request, metadata: { store: current.store, cycle: selected.cycle, fileName, bytes: bytes.length } });
   return NextResponse.json({ ok: true, store: current.store, cycle: selected.cycle, fileName });
 }
