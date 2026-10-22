@@ -101,6 +101,28 @@ const auditActionLabel: Record<string, string> = {
   "view-open": "Consultou menu", "orders-import": "Importou pedidos", "arruamento-import": "Importou arruamento",
   "dashboard-import": "Importou dashboard", "dashboard-refresh": "Atualizou dashboard",
 };
+const auditEntityLabel: Record<string, string> = {
+  session: "Sessão", "dashboard-view": "Tela", orders: "Pedidos", "arruamento-workbook": "Planilha de arruamento", dashboard: "Dashboard",
+};
+function auditDetails(event: AuditEvent) {
+  const metadata = event.metadata || {};
+  const parts: string[] = [];
+  if (event.action === "view-open") parts.push(`Acessou: ${String(metadata.view || "tela não informada")}`);
+  if (event.action === "session-start") parts.push("Login realizado");
+  if (event.action === "session-end") parts.push("Logout registrado");
+  if (event.action === "session-heartbeat") parts.push("Usuário ativo");
+  if (metadata.fileName) parts.push(`Arquivo: ${String(metadata.fileName)}`);
+  if (metadata.store) parts.push(`Loja: ${String(metadata.store)}`);
+  if (metadata.cycle) parts.push(`Ciclo: ${String(metadata.cycle)}`);
+  if (metadata.imported != null) parts.push(`Novos: ${String(metadata.imported)}`);
+  if (metadata.ignoredDuplicates != null) parts.push(`Duplicados ignorados: ${String(metadata.ignoredDuplicates)}`);
+  if (metadata.replacedHistory) parts.push("Histórico anterior substituído");
+  if (metadata.durationSeconds != null) {
+    const seconds = Math.max(0, Number(metadata.durationSeconds));
+    parts.push(`Duração: ${seconds >= 3600 ? `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)}min` : `${Math.floor(seconds / 60)}min`}`);
+  }
+  return parts.join(" · ") || "Atividade registrada";
+}
 const platformPeriodLabel = (indicator: Indicator, selectedCycle: string) => {
   if (indicator.id !== "plataforma-logistica" || !indicator.records.length) return null;
   const latestCycle = selectedCycle
@@ -715,7 +737,7 @@ function AuditView({ events, loading, error, onReload }: { events: AuditEvent[];
     <section className="page-head"><div><span className="eyebrow">Governança</span><h1>Auditoria de atividades</h1><p>Registro das alterações relevantes feitas no dashboard e no banco.</p></div><button className="refresh" type="button" onClick={onReload} disabled={loading}><RefreshCw className={loading ? "spin" : ""} size={16} />{loading ? "Atualizando…" : "Atualizar auditoria"}</button></section>
     {error && <p className="error-text" role="alert">{error}</p>}
     <section className="summary-grid three audit-summary"><article><span>Entradas registradas</span><strong>{sessions.length}</strong><small>Login/sessão iniciada</small></article><article><span>Menus consultados</span><strong>{views.length}</strong><small>Navegações registradas</small></article><article><span>Última atividade</span><strong>{lastHeartbeat ? shortDate.format(new Date(lastHeartbeat.createdAt)) : "—"}</strong><small>{lastHeartbeat ? `${lastHeartbeat.actorName || "Usuário"} · sessão ativa` : "Sem heartbeat"}</small></article></section>
-    <section className="panel audit-panel"><div className="section-title"><div><h2>Últimas atividades</h2><p>Inclui entrada, saída, menus consultados, sessões e alterações administrativas.</p></div><span className="table-hint">{events.length} eventos</span></div>{loading ? <p className="muted">Carregando registros…</p> : !events.length ? <p className="muted">Nenhum evento registrado ainda.</p> : <div className="table-wrap"><table className="audit-table"><thead><tr><th>Data/hora</th><th>Usuário</th><th>Ação</th><th>Objeto</th><th>Detalhes</th></tr></thead><tbody>{events.map((event) => <tr key={event.id}><td>{shortDate.format(new Date(event.createdAt))}</td><td><strong>{event.actorName || "Sistema"}</strong><small>{event.actorEmail || "—"}</small></td><td><span className="audit-action">{auditActionLabel[event.action] || event.action}</span></td><td>{event.entityType || "—"}{event.entityId ? <small>{event.entityId}</small> : null}</td><td>{Object.entries(event.metadata || {}).filter(([key]) => !["bytes", "sessionId"].includes(key)).map(([key, value]) => `${key === "durationSeconds" ? "Duração (s)" : key}: ${String(value)}`).join(" · ") || "—"}</td></tr>)}</tbody></table></div>}</section>
+    <section className="panel audit-panel"><div className="section-title"><div><h2>Últimas atividades</h2><p>Somente administradores visualizam esta área.</p></div><span className="table-hint">{events.length} eventos</span></div>{loading ? <p className="muted">Carregando registros…</p> : !events.length ? <p className="muted">Nenhum evento registrado ainda.</p> : <div className="table-wrap"><table className="audit-table"><thead><tr><th>Data e hora</th><th>Usuário</th><th>Ação</th><th>Objeto</th><th>Resumo</th></tr></thead><tbody>{events.map((event) => <tr key={event.id}><td>{shortDate.format(new Date(event.createdAt))}</td><td><strong>{event.actorName || "Sistema"}</strong><small>{event.actorEmail || "—"}</small></td><td><span className="audit-action">{auditActionLabel[event.action] || event.action}</span></td><td>{auditEntityLabel[event.entityType || ""] || "Atividade"}</td><td>{auditDetails(event)}</td></tr>)}</tbody></table></div>}</section>
   </>;
 }
 
