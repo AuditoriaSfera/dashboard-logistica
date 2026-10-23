@@ -103,13 +103,18 @@ const auditActionLabel: Record<string, string> = {
   "dashboard-import": "Importou dashboard", "dashboard-refresh": "Atualizou dashboard",
 };
 const auditEntityLabel: Record<string, string> = {
-  session: "Sessão", "dashboard-view": "Tela", orders: "Pedidos", "arruamento-workbook": "Planilha de arruamento", dashboard: "Dashboard",
+  session: "Acesso ao dashboard", "dashboard-view": "Menu/indicador", orders: "Pedidos", "arruamento-workbook": "Planilha de arruamento", dashboard: "Dashboard",
+};
+const auditViewLabel = (view: string, indicatorId: string, indicators: Array<{ id: string; label: string }>) => {
+  if (view === "indicator") return indicators.find((item) => item.id === indicatorId)?.label || "Indicador";
+  if (view === "store") return "Visão 360° por loja";
+  return ({ overview: "Visão Geral", stores: "360° Por Loja", ranking: "Ranking", performance: "Pedidos", recurrence: "Recorrência", quality: "Qualidade dos dados", cadastro: "Usuários", profile: "Meu perfil", settings: "Configurações", audit: "Auditoria" } as Record<string, string>)[view] || view;
 };
 function auditDetails(event: AuditEvent) {
   const metadata = event.metadata || {};
   const parts: string[] = [];
-  if (event.action === "view-open") parts.push(`Acessou: ${String(metadata.view || "tela não informada")}`);
-  if (event.action === "view-close") parts.push(`Saiu de: ${String(metadata.view || "tela não informada")}`);
+  if (event.action === "view-open") parts.push(`Menu/indicador: ${String(metadata.view || "não informado")}`);
+  if (event.action === "view-close") parts.push(`Menu/indicador: ${String(metadata.view || "não informado")}`);
   if (event.action === "session-start") parts.push("Login realizado");
   if (event.action === "session-end") parts.push("Logout registrado");
   if (metadata.fileName) parts.push(`Arquivo: ${String(metadata.fileName)}`);
@@ -769,14 +774,15 @@ function OrderRecurrenceView({ data, records, loading, error, selectedStore, cyc
 }
 
 function AuditView({ events, loading, error, onReload }: { events: AuditEvent[]; loading: boolean; error: string; onReload: () => void }) {
-  const sessions = events.filter((event) => event.action === "session-start");
-  const views = events.filter((event) => event.action === "view-open");
-  const menuTime = events.filter((event) => event.action === "view-close").reduce((total, event) => total + Number(event.metadata?.durationSeconds || 0), 0);
+  const visibleEvents = events.filter((event) => event.action !== "session-heartbeat");
+  const sessions = visibleEvents.filter((event) => event.action === "session-start");
+  const views = visibleEvents.filter((event) => event.action === "view-open");
+  const menuTime = visibleEvents.filter((event) => event.action === "view-close").reduce((total, event) => total + Number(event.metadata?.durationSeconds || 0), 0);
   return <>
     <section className="page-head"><div><span className="eyebrow">Governança</span><h1>Auditoria de atividades</h1><p>Registro das alterações relevantes feitas no dashboard e no banco.</p></div><button className="refresh" type="button" onClick={onReload} disabled={loading}><RefreshCw className={loading ? "spin" : ""} size={16} />{loading ? "Atualizando…" : "Atualizar auditoria"}</button></section>
     {error && <p className="error-text" role="alert">{error}</p>}
     <section className="summary-grid three audit-summary"><article><span>Entradas registradas</span><strong>{sessions.length}</strong><small>Login/sessão iniciada</small></article><article><span>Menus consultados</span><strong>{views.length}</strong><small>Entradas em menus</small></article><article><span>Tempo registrado em menus</span><strong>{auditDuration(menuTime)}</strong><small>Somente ao sair de cada menu</small></article></section>
-    <section className="panel audit-panel"><div className="section-title"><div><h2>Últimas atividades</h2><p>Somente administradores visualizam esta área.</p></div><span className="table-hint">{events.length} eventos</span></div>{loading ? <p className="muted">Carregando registros…</p> : !events.length ? <p className="muted">Nenhum evento registrado ainda.</p> : <div className="table-wrap"><table className="audit-table"><thead><tr><th>Data e hora</th><th>Usuário</th><th>Ação</th><th>Objeto</th><th>Resumo</th></tr></thead><tbody>{events.map((event) => <tr key={event.id}><td>{shortDate.format(new Date(event.createdAt))}</td><td><strong>{event.actorName || "Sistema"}</strong><small>{event.actorEmail || "—"}</small></td><td><span className="audit-action">{auditActionLabel[event.action] || event.action}</span></td><td>{auditEntityLabel[event.entityType || ""] || "Atividade"}</td><td>{auditDetails(event)}</td></tr>)}</tbody></table></div>}</section>
+    <section className="panel audit-panel"><div className="section-title"><div><h2>Últimas atividades</h2><p>Somente administradores visualizam esta área.</p></div><span className="table-hint">{visibleEvents.length} eventos</span></div>{loading ? <p className="muted">Carregando registros…</p> : !visibleEvents.length ? <p className="muted">Nenhum evento registrado ainda.</p> : <div className="table-wrap"><table className="audit-table"><thead><tr><th>Data e hora</th><th>Usuário</th><th>Ação</th><th>O que foi acessado</th><th>Resumo</th></tr></thead><tbody>{visibleEvents.map((event) => <tr key={event.id}><td>{shortDate.format(new Date(event.createdAt))}</td><td><strong>{event.actorName || "Sistema"}</strong><small>{event.actorEmail || "—"}</small></td><td><span className="audit-action">{auditActionLabel[event.action] || event.action}</span></td><td>{auditEntityLabel[event.entityType || ""] || "Atividade"}</td><td>{auditDetails(event)}</td></tr>)}</tbody></table></div>}</section>
   </>;
 }
 
@@ -857,12 +863,13 @@ export default function Home() {
 
   useEffect(() => {
     if (!currentUser || !auditSessionId.current) return;
-    if (auditView.current === view) return;
+    const readableView = auditViewLabel(view, activeIndicator, data?.filters.indicators || []);
+    if (auditView.current === readableView) return;
     closeAuditView();
-    auditView.current = view;
+    auditView.current = readableView;
     auditViewStartedAt.current = Date.now();
-    sendAuditEvent("view-open", { view });
-  }, [view, currentUser?.id, sendAuditEvent, closeAuditView]);
+    sendAuditEvent("view-open", { view: readableView });
+  }, [view, activeIndicator, data?.filters.indicators, currentUser?.id, sendAuditEvent, closeAuditView]);
 
   useEffect(() => {
     if (view !== "overview") return;
