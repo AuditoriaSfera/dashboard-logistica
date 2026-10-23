@@ -374,8 +374,9 @@ function Filters({
   const availableDates = Object.values(data.indicators).flatMap((item) => item.records.map((row) => (row.date || row.periodEnd || row.periodStart || "").slice(0, 10))).filter(Boolean).sort();
   const today = new Date();
   const lastDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  const firstAvailableDate = availableDates[0] || "2026-01-01";
   const uniqueDates: string[] = [];
-  for (let cursor = new Date("2026-01-01T00:00:00"); cursor <= new Date(`${lastDate}T00:00:00`); cursor.setDate(cursor.getDate() + 1)) uniqueDates.push(cursor.toISOString().slice(0, 10));
+  for (let cursor = new Date(`${firstAvailableDate}T00:00:00`); cursor <= new Date(`${lastDate}T00:00:00`); cursor.setDate(cursor.getDate() + 1)) uniqueDates.push(cursor.toISOString().slice(0, 10));
   const setAvailableDate = (value: string, setter: (value: string) => void) => { if (!value || uniqueDates.includes(value)) setter(value); };
   return (
     <section className="filter-bar" aria-label="Filtros globais">
