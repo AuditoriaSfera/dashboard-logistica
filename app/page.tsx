@@ -125,10 +125,7 @@ function auditDetails(event: AuditEvent) {
 }
 const platformPeriodLabel = (indicator: Indicator, selectedCycle: string) => {
   if (indicator.id !== "plataforma-logistica" || !indicator.records.length) return null;
-  const latestCycle = selectedCycle
-    ? Number(selectedCycle)
-    : Math.max(...indicator.records.map((row) => Number(row.cycle)).filter(Number.isFinite));
-  const periodRows = indicator.records.filter((row) => Number(row.cycle) === latestCycle);
+  const periodRows = selectedCycle ? indicator.records.filter((row) => Number(row.cycle) === Number(selectedCycle)) : indicator.records;
   const rows = periodRows.length ? periodRows : indicator.records;
   const starts = rows.map((row) => row.periodStart || row.date).filter((value): value is string => Boolean(value)).sort();
   const ends = rows.map((row) => row.periodEnd || row.date).filter((value): value is string => Boolean(value)).sort();
@@ -224,18 +221,20 @@ const recomputeIndicator = (
   });
   const hasDateFilter = Boolean(effectiveStart || effectiveEnd);
   const cycleRows = records.filter((row) => row.cycle != null);
+  const allCycles = !cycle && !startDate && !endDate;
   const latestKey = cyclePeriod
     ? `Ciclo ${cycle}`
     : hasDateFilter
     ? `${startDate || "início"} a ${endDate || "fim"}`
+    : allCycles
+    ? "Todos os ciclos"
     : cycleRows.length
     ? Math.max(...cycleRows.map((row) => Number(row.cycle)))
     : records.map((row) => row.date || "").sort().at(-1) || null;
     // Retirada é uma apuração acumulada por ciclo. Sem nenhum filtro
     // explícito, a tabela deve exibir todos os ciclos disponíveis; quando o
     // usuário escolhe ciclo ou período, o recorte continua sendo respeitado.
-    const showAllWithdrawalCycles = indicator.id === "retirada" && !cycle && !startDate && !endDate;
-    const latestRows = showAllWithdrawalCycles || cycle || hasDateFilter
+    const latestRows = allCycles || cycle || hasDateFilter
       ? records
       : records.filter((row) => row.cycle != null ? row.cycle === latestKey : row.date === latestKey);
   // A escolha de ciclo define o recorte atual, mas não deve apagar o
@@ -259,7 +258,7 @@ const recomputeIndicator = (
   const aggregate = aggregateRows(latestRows, indicator);
   const generalCycle = cycle || String(latestRows.map((row) => row.cycle).filter((value): value is number => value != null).sort((a, b) => a - b).at(-1) ?? "");
   const generalKeys = Object.keys(indicator.generalByCycle || {}).sort((a, b) => Number(a) - Number(b));
-  const generalValue = indicator.generalByCycle?.[generalCycle]
+  const generalValue = allCycles ? null : indicator.generalByCycle?.[generalCycle]
     ?? indicator.generalByCycle?.[generalKeys.filter((key) => Number(key) <= Number(generalCycle)).at(-1) || ""]
     ?? null;
   const generalAggregate = generalValue == null
@@ -473,7 +472,7 @@ function ArruamentoWorkbookAction({ store, storeCode, cycle, currentUser }: { st
 
 function IndicatorDetailTable({ indicator, onStore, currentUser, cycle }: { indicator: Indicator; onStore: (store: string) => void; currentUser: AccessUser; cycle: string }) {
   const rows = indicator.ranking;
-  const workbookCycle = cycle || (indicator.id === "arruamento" && indicator.latestKey != null ? String(indicator.latestKey) : "");
+  const workbookCycle = cycle || (indicator.id === "arruamento" && typeof indicator.latestKey === "number" ? String(indicator.latestKey) : "");
   const receivingDateKeys = indicator.id === "recebimento"
     ? indicator.records.map((item) => String(item.date || item.periodEnd || item.periodStart || "").slice(0, 10)).filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value)).sort()
     : [];
@@ -494,16 +493,13 @@ function IndicatorDetailTable({ indicator, onStore, currentUser, cycle }: { indi
       return { primary: integer.format(records.length), secondary: "", late: integer.format(late), volumes: matchedVolumes.length ? integer.format(volumeTotal) : "—", weeklyVolumes: matchedVolumes.length ? `${weeklyVolume.format(volumeTotal / receivingWeeks)}/semana` : "—" };
     }
     if (indicator.id === "arruamento") {
-      const cycles = records.map((item) => item.cycle).filter((value): value is number => value != null);
-      const latestCycle = cycles.length ? Math.max(...cycles) : null;
-      if (latestCycle != null) records = records.filter((item) => item.cycle === latestCycle);
-      const source = records.at(-1)?.raw || {};
       const numberFrom = (value: unknown, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+      const source = records.map((item) => item.raw || {});
       return {
         primary: "", secondary: "",
-        skuTotal: integer.format(numberFrom(source["Quantidade total de SKU vendidos no período"], records.at(-1)?.volume || 0)),
-        arranged: integer.format(numberFrom(source["Quantidade produto arruado"])),
-        withoutArrangement: integer.format(numberFrom(source["Quantidade produto sem arruamento"])),
+        skuTotal: integer.format(source.reduce((sum, raw, index) => sum + numberFrom(raw["Quantidade total de SKU vendidos no período"], records[index]?.volume || 0), 0)),
+        arranged: integer.format(source.reduce((sum, raw) => sum + numberFrom(raw["Quantidade produto arruado"]), 0)),
+        withoutArrangement: integer.format(source.reduce((sum, raw) => sum + numberFrom(raw["Quantidade produto sem arruamento"]), 0)),
       };
     }
     if (indicator.id === "recebimento") {
