@@ -98,8 +98,8 @@ const formatDay = (value: string | null | undefined) => {
   return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short" }).format(new Date(`${day}T00:00:00`));
 };
 const auditActionLabel: Record<string, string> = {
-  "session-start": "Entrou no dashboard", "session-heartbeat": "Sessão ativa", "session-end": "Saiu do dashboard",
-  "view-open": "Consultou menu", "orders-import": "Importou pedidos", "arruamento-import": "Importou arruamento",
+  "session-start": "Entrou no dashboard", "session-end": "Saiu do dashboard",
+  "view-open": "Entrou no menu", "view-close": "Saiu do menu", "orders-import": "Importou pedidos", "arruamento-import": "Importou arruamento",
   "dashboard-import": "Importou dashboard", "dashboard-refresh": "Atualizou dashboard",
 };
 const auditEntityLabel: Record<string, string> = {
@@ -109,9 +109,9 @@ function auditDetails(event: AuditEvent) {
   const metadata = event.metadata || {};
   const parts: string[] = [];
   if (event.action === "view-open") parts.push(`Acessou: ${String(metadata.view || "tela não informada")}`);
+  if (event.action === "view-close") parts.push(`Saiu de: ${String(metadata.view || "tela não informada")}`);
   if (event.action === "session-start") parts.push("Login realizado");
   if (event.action === "session-end") parts.push("Logout registrado");
-  if (event.action === "session-heartbeat") parts.push("Usuário ativo");
   if (metadata.fileName) parts.push(`Arquivo: ${String(metadata.fileName)}`);
   if (metadata.store) parts.push(`Loja: ${String(metadata.store)}`);
   if (metadata.cycle) parts.push(`Ciclo: ${String(metadata.cycle)}`);
@@ -123,6 +123,11 @@ function auditDetails(event: AuditEvent) {
     parts.push(`Duração: ${seconds >= 3600 ? `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)}min` : `${Math.floor(seconds / 60)}min`}`);
   }
   return parts.join(" · ") || "Atividade registrada";
+}
+function auditDuration(seconds: number) {
+  const value = Math.max(0, Math.round(seconds));
+  if (value < 60) return `${value}s`;
+  return `${Math.floor(value / 60)}min${value % 60 ? ` ${value % 60}s` : ""}`;
 }
 const platformPeriodLabel = (indicator: Indicator, selectedCycle: string) => {
   if (indicator.id !== "plataforma-logistica" || !indicator.records.length) return null;
@@ -766,11 +771,11 @@ function OrderRecurrenceView({ data, records, loading, error, selectedStore, cyc
 function AuditView({ events, loading, error, onReload }: { events: AuditEvent[]; loading: boolean; error: string; onReload: () => void }) {
   const sessions = events.filter((event) => event.action === "session-start");
   const views = events.filter((event) => event.action === "view-open");
-  const lastHeartbeat = events.find((event) => event.action === "session-heartbeat");
+  const menuTime = events.filter((event) => event.action === "view-close").reduce((total, event) => total + Number(event.metadata?.durationSeconds || 0), 0);
   return <>
     <section className="page-head"><div><span className="eyebrow">Governança</span><h1>Auditoria de atividades</h1><p>Registro das alterações relevantes feitas no dashboard e no banco.</p></div><button className="refresh" type="button" onClick={onReload} disabled={loading}><RefreshCw className={loading ? "spin" : ""} size={16} />{loading ? "Atualizando…" : "Atualizar auditoria"}</button></section>
     {error && <p className="error-text" role="alert">{error}</p>}
-    <section className="summary-grid three audit-summary"><article><span>Entradas registradas</span><strong>{sessions.length}</strong><small>Login/sessão iniciada</small></article><article><span>Menus consultados</span><strong>{views.length}</strong><small>Navegações registradas</small></article><article><span>Última atividade</span><strong>{lastHeartbeat ? shortDate.format(new Date(lastHeartbeat.createdAt)) : "—"}</strong><small>{lastHeartbeat ? `${lastHeartbeat.actorName || "Usuário"} · sessão ativa` : "Sem heartbeat"}</small></article></section>
+    <section className="summary-grid three audit-summary"><article><span>Entradas registradas</span><strong>{sessions.length}</strong><small>Login/sessão iniciada</small></article><article><span>Menus consultados</span><strong>{views.length}</strong><small>Entradas em menus</small></article><article><span>Tempo registrado em menus</span><strong>{auditDuration(menuTime)}</strong><small>Somente ao sair de cada menu</small></article></section>
     <section className="panel audit-panel"><div className="section-title"><div><h2>Últimas atividades</h2><p>Somente administradores visualizam esta área.</p></div><span className="table-hint">{events.length} eventos</span></div>{loading ? <p className="muted">Carregando registros…</p> : !events.length ? <p className="muted">Nenhum evento registrado ainda.</p> : <div className="table-wrap"><table className="audit-table"><thead><tr><th>Data e hora</th><th>Usuário</th><th>Ação</th><th>Objeto</th><th>Resumo</th></tr></thead><tbody>{events.map((event) => <tr key={event.id}><td>{shortDate.format(new Date(event.createdAt))}</td><td><strong>{event.actorName || "Sistema"}</strong><small>{event.actorEmail || "—"}</small></td><td><span className="audit-action">{auditActionLabel[event.action] || event.action}</span></td><td>{auditEntityLabel[event.entityType || ""] || "Atividade"}</td><td>{auditDetails(event)}</td></tr>)}</tbody></table></div>}</section>
   </>;
 }
@@ -819,30 +824,45 @@ export default function Home() {
   const [signingOut, setSigningOut] = useState(false);
   const auditSessionId = useRef<string | null>(null);
   const auditSessionStartedAt = useRef<number | null>(null);
+  const auditView = useRef<string | null>(null);
+  const auditViewStartedAt = useRef<number | null>(null);
   const [overviewRotation, setOverviewRotation] = useState(0);
   const [rotationPulse, setRotationPulse] = useState(false);
   const refreshWorkbookInput = useRef<HTMLInputElement>(null);
   const lastOverviewInteraction = useRef(Date.now());
 
-  const sendAuditEvent = useCallback((action: string, metadata: Record<string, unknown> = {}, keepalive = false) => {
+  const sendAuditEvent = useCallback((action: string, metadata: Record<string, unknown> = {}, keepalive = false, durationSeconds?: number) => {
     if (!currentUser) return;
-    void fetch("/api/audit", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin", keepalive, body: JSON.stringify({ action, ...metadata, sessionId: auditSessionId.current, durationSeconds: auditSessionStartedAt.current ? (Date.now() - auditSessionStartedAt.current) / 1000 : undefined }) }).catch(() => {});
+    void fetch("/api/audit", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin", keepalive, body: JSON.stringify({ action, ...metadata, sessionId: auditSessionId.current, durationSeconds: durationSeconds ?? (auditSessionStartedAt.current ? (Date.now() - auditSessionStartedAt.current) / 1000 : undefined) }) }).catch(() => {});
   }, [currentUser?.id]);
+
+  const closeAuditView = useCallback((keepalive = false) => {
+    if (!auditView.current) return;
+    const view = auditView.current;
+    const duration = auditViewStartedAt.current ? Math.max(0, (Date.now() - auditViewStartedAt.current) / 1000) : 0;
+    sendAuditEvent("view-close", { view }, keepalive, duration);
+    auditView.current = null;
+    auditViewStartedAt.current = null;
+  }, [sendAuditEvent]);
 
   useEffect(() => {
     if (!currentUser) return;
     auditSessionId.current = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
     auditSessionStartedAt.current = Date.now();
     sendAuditEvent("session-start");
-    const heartbeat = window.setInterval(() => sendAuditEvent("session-heartbeat"), 60_000);
-    const end = () => sendAuditEvent("session-end", {}, true);
+    const end = () => { closeAuditView(true); sendAuditEvent("session-end", {}, true); };
     window.addEventListener("beforeunload", end);
-    return () => { window.clearInterval(heartbeat); window.removeEventListener("beforeunload", end); sendAuditEvent("session-end"); auditSessionId.current = null; auditSessionStartedAt.current = null; };
-  }, [currentUser?.id, sendAuditEvent]);
+    return () => { window.removeEventListener("beforeunload", end); closeAuditView(); sendAuditEvent("session-end"); auditSessionId.current = null; auditSessionStartedAt.current = null; };
+  }, [currentUser?.id, sendAuditEvent, closeAuditView]);
 
   useEffect(() => {
-    if (currentUser && auditSessionId.current) sendAuditEvent("view-open", { view });
-  }, [view, currentUser?.id, sendAuditEvent]);
+    if (!currentUser || !auditSessionId.current) return;
+    if (auditView.current === view) return;
+    closeAuditView();
+    auditView.current = view;
+    auditViewStartedAt.current = Date.now();
+    sendAuditEvent("view-open", { view });
+  }, [view, currentUser?.id, sendAuditEvent, closeAuditView]);
 
   useEffect(() => {
     if (view !== "overview") return;

@@ -18,7 +18,7 @@ export async function GET(request: Request) {
   }
 }
 
-const CLIENT_ACTIONS = new Set(["session-start", "session-heartbeat", "session-end", "view-open"]);
+const CLIENT_ACTIONS = new Set(["session-start", "session-end", "view-open", "view-close"]);
 
 export async function POST(request: Request) {
   const access = await authorize(request);
@@ -32,7 +32,7 @@ export async function POST(request: Request) {
       view: typeof body.view === "string" ? body.view.slice(0, 80) : null,
       durationSeconds: Number.isFinite(body.durationSeconds) ? Math.max(0, Math.round(Number(body.durationSeconds))) : null,
     };
-    await logAuditEvent(getSql(), { actor: access.user, action: body.action, entityType: body.action === "view-open" ? "dashboard-view" : "session", entityId: metadata.view || metadata.sessionId, request, metadata });
+    await logAuditEvent(getSql(), { actor: access.user, action: body.action, entityType: ["view-open", "view-close"].includes(body.action) ? "dashboard-view" : "session", entityId: metadata.view || metadata.sessionId, request, metadata });
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Não foi possível registrar a auditoria." }, { status: 400 });
