@@ -10,6 +10,7 @@ import {
   ResponsiveContainer, Tooltip, XAxis, YAxis, ReferenceLine, LabelList,
 } from "recharts";
 import cyclePeriodsSource from "../config/cycles.json";
+import * as XLSX from "xlsx";
 import { AccessUser, authRequest } from "./auth-client";
 import { AuthScreen, PasswordChangeScreen, CadastroView } from "./access-components";
 
@@ -146,6 +147,32 @@ function downloadCsv(fileName: string, headers: string[], rows: unknown[][]) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a"); link.href = url; link.download = fileName; link.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function exportIndicatorExcel(indicator: Indicator, filters: { cycle: string; startDate: string; endDate: string; stores: string[]; status: string }, sourceFile: string) {
+  const ranking = indicator.ranking.filter((row) => !filters.status || row.status === filters.status);
+  const allowedStores = new Set(ranking.map((row) => row.store));
+  const records = indicator.records.filter((row) => allowedStores.has(row.store));
+  const summaryRows = ranking.map((row) => ({
+    Indicador: indicator.label, Loja: row.store, Código: row.storeCode || "", Resultado: row.value, Meta: row.target,
+    Status: STATUS[row.status]?.label || row.status, Registros: row.count,
+  }));
+  const recordRows = records.map((row) => ({
+    Indicador: indicator.label, Loja: row.store, Código: row.storeCode || "", Ciclo: row.cycle ?? "", Data: row.date || "",
+    "Período inicial": row.periodStart || "", "Período final": row.periodEnd || "", Resultado: row.value, Meta: row.target,
+    Volume: row.volume, Numerador: row.numerator, Denominador: row.denominator, "Status na fonte": row.statusSource || "", Observações: row.notes || "",
+  }));
+  const filterRows = [
+    { Filtro: "Indicador", Valor: indicator.label }, { Filtro: "Ciclo", Valor: filters.cycle || "Todos os ciclos" },
+    { Filtro: "Data inicial", Valor: filters.startDate || "Todo o período" }, { Filtro: "Data final", Valor: filters.endDate || "Todo o período" },
+    { Filtro: "Lojas", Valor: filters.stores.length ? filters.stores.join(", ") : "Todas as lojas" },
+    { Filtro: "Status", Valor: filters.status ? STATUS[filters.status as StatusKey]?.label || filters.status : "Todos" },
+    { Filtro: "Fonte", Valor: sourceFile }, { Filtro: "Exportado em", Valor: new Date().toLocaleString("pt-BR") },
+  ];
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(summaryRows), "Resumo");
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(recordRows), "Registros");
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(filterRows), "Filtros aplicados");
+  XLSX.writeFile(workbook, `${normalizeText(indicator.label).replace(/\s+/g, "-")}-filtrado.xlsx`);
 }
 const matchesStores = (selected: string[] | string, store: string) => {
   const values = Array.isArray(selected) ? selected : selected ? [selected] : [];
@@ -1055,7 +1082,7 @@ export default function Home() {
           </>}
 
           {view === "indicator" && chosen && <>
-            <section className="page-head"><div><span className="eyebrow">Indicador</span><h1>{chosen.label}</h1><p>Meta, evolução, ranking e registros normalizados.</p></div>{(!isWithdrawal(chosen.id) || store.length > 0) && <Badge status={chosen.current.status} informational={isInformational(chosen.id)} />}</section>
+            <section className="page-head"><div><span className="eyebrow">Indicador</span><h1>{chosen.label}</h1><p>Meta, evolução, ranking e registros normalizados.</p></div><div className="page-head-actions"><button className="refresh" type="button" onClick={() => exportIndicatorExcel(chosen, { cycle, startDate, endDate, stores: store, status: statusFilter }, data.source.fileName)}><Download size={16} />Exportar Excel</button>{(!isWithdrawal(chosen.id) || store.length > 0) && <Badge status={chosen.current.status} informational={isInformational(chosen.id)} />}</div></section>
              <section className="summary-grid three"><article><span>{isWithdrawal(chosen.id) ? "Situação" : "Resultado geral"}</span><strong>{isWithdrawal(chosen.id) ? store.length === 1 ? <><ResultValue result={chosen.current} id={chosen.id} /> pedidos em atraso</> : "\u00a0" : <ResultValue result={chosen.current} id={chosen.id} />}</strong></article><article><span>Meta</span><strong>{isInformational(chosen.id) ? "Apenas visualização" : formatTarget(chosen.id, chosen.current.target)}</strong></article><article><span>{isWithdrawal(chosen.id) ? "Apuração" : "Diferença"}</span><strong>{isWithdrawal(chosen.id) ? chosen.label : isInformational(chosen.id) ? "Não se aplica" : deltaText(chosen.current.value, chosen.current.target, chosen.direction, chosen.id)}</strong></article></section>
              {isWithdrawal(chosen.id)
                   ? <><section className="panel"><h2>{chosen.label}</h2><RankingSummary indicator={chosen} /><IndicatorDetailTable indicator={chosen} onStore={openStore} currentUser={currentUser} cycle={cycle} /></section><StoreComparisonChart indicator={chosen} /><section className="panel"><h2>{trendTitle(chosen)}</h2><Trend indicator={chosen} selectedCycle={cycle} /></section></>
