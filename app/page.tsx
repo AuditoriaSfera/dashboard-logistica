@@ -567,14 +567,15 @@ function IndicatorDetailTable({ indicator, onStore, currentUser, cycle }: { indi
 }
 
 function indicatorScopeLabel(indicator: Indicator, cycle: string, startDate: string, endDate: string) {
-  const cyclePeriod = cycle ? CYCLE_PERIODS[cycle] : null;
+  const inferredCycle = cycle || (typeof indicator.latestKey === "string" && /^Ciclo \d+$/.test(indicator.latestKey) ? indicator.latestKey.replace("Ciclo ", "") : "");
+  const cyclePeriod = inferredCycle ? CYCLE_PERIODS[inferredCycle] : null;
   const dates = indicator.records.map((row) => (row.date || row.periodStart || row.periodEnd || "").slice(0, 10)).filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value)).sort();
   const sourceStart = dates[0] || "";
   const sourceEnd = dates.at(-1) || "";
-  const effectiveStart = [sourceStart, startDate, cyclePeriod?.start].filter(Boolean).sort().at(-1) || sourceStart;
-  const effectiveEnd = [sourceEnd, endDate, cyclePeriod?.end].filter(Boolean).sort().at(0) || sourceEnd;
+  const effectiveStart = cyclePeriod?.start || [sourceStart, startDate].filter(Boolean).sort().at(-1) || sourceStart;
+  const effectiveEnd = cyclePeriod?.end || [sourceEnd, endDate].filter(Boolean).sort().at(0) || sourceEnd;
   const range = effectiveStart && effectiveEnd ? `${formatDay(effectiveStart)} a ${formatDay(effectiveEnd)}` : "período disponível";
-  return `${cycle ? `Ciclo ${cycle}` : "Todos os ciclos"} · ${range}`;
+  return `${inferredCycle ? `Ciclo ${inferredCycle}` : "Todos os ciclos"} · ${range}`;
 }
 
 function RankingSummary({ indicator, cycle = "", startDate = "", endDate = "" }: { indicator: Indicator; cycle?: string; startDate?: string; endDate?: string }) {
