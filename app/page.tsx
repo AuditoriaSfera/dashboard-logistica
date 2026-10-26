@@ -234,15 +234,16 @@ const sourceGeneralValue = (
   indicator: Pick<Indicator, "id" | "direction" | "configuredTarget" | "generalByCycle">,
   rows: RecordItem[],
 ): number | null => {
-  if (indicator.id !== "pec-omni" || !indicator.generalByCycle) return null;
-  const cycles = [...new Set(rows.map((row) => row.cycle).filter((cycle): cycle is number => cycle != null))]
-    .map(String)
-    .filter((cycle) => indicator.generalByCycle?.[cycle] != null);
+  if (indicator.id !== "pec-omni") return null;
+  // No consolidado do PEC, uma linha sem resultado ou com 0% não entra na
+  // média. Ela continua disponível no ranking para evidenciar a loja fora da
+  // meta, mas não pode distorcer o resultado geral do período.
+  const eligible = rows.filter((row) => row.value != null && Number(row.value) > 0);
+  const cycles = [...new Set(eligible.map((row) => row.cycle).filter((cycle): cycle is number => cycle != null))].map(String);
   if (!cycles.length) return null;
-  // O Resultado Geral é o número oficial publicado pela fonte para cada ciclo.
-  // Como a planilha não traz o denominador por ciclo, a consolidação histórica
-  // usa a média dos resultados oficiais dos ciclos, nunca a média das lojas.
-  return cycles.reduce((sum, cycle) => sum + Number(indicator.generalByCycle?.[cycle]), 0) / cycles.length;
+  const cycleValues = cycles.map((cycle) => aggregateRows(eligible.filter((row) => String(row.cycle) === cycle), indicator).value)
+    .filter((value): value is number => value != null);
+  return cycleValues.length ? cycleValues.reduce((sum, value) => sum + value, 0) / cycleValues.length : null;
 };
 const periodOf = (row: RecordItem) => row.cycle != null ? String(row.cycle) : row.date || "";
 const recomputeIndicator = (
@@ -313,13 +314,18 @@ const recomputeIndicator = (
   latestRows.forEach((row) => { if (row.store) byStore.set(row.store, [...(byStore.get(row.store) || []), row]); });
   const ranking = allStores.map(({ store: name, storeCode }) => ({ store: name, storeCode, ...aggregateRows(byStore.get(name) || [], indicator) }))
     .sort((a, b) => a.value == null ? 1 : b.value == null ? -1 : b.value - a.value || a.store.localeCompare(b.store, "pt-BR"));
-  const aggregate = aggregateRows(latestRows, indicator);
+  const aggregateRowsForCurrent = indicator.id === "pec-omni" && !store.length
+    ? latestRows.filter((row) => row.value != null && Number(row.value) > 0)
+    : latestRows;
+  const aggregate = aggregateRows(aggregateRowsForCurrent, indicator);
   const generalCycle = cycle || String(latestRows.map((row) => row.cycle).filter((value): value is number => value != null).sort((a, b) => a - b).at(-1) ?? "");
   const generalKeys = Object.keys(indicator.generalByCycle || {}).sort((a, b) => Number(a) - Number(b));
   // O Resultado Geral da fonte representa todas as lojas. Com loja(s)
   // selecionada(s), o dashboard precisa calcular apenas o recorte filtrado.
   const sourceValue = store.length ? null : sourceGeneralValue(indicator, latestRows);
-  const generalValue = sourceValue ?? indicator.generalByCycle?.[generalCycle]
+  const generalValue = indicator.id === "pec-omni" && !store.length
+    ? sourceValue
+    : indicator.generalByCycle?.[generalCycle]
     ?? indicator.generalByCycle?.[generalKeys.filter((key) => Number(key) <= Number(generalCycle)).at(-1) || ""]
     ?? null;
   const generalAggregate = generalValue == null
