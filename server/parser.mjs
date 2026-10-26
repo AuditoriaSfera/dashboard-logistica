@@ -465,6 +465,8 @@ function parseGeneric(rows, indicator) {
     end: findColumn(headers, ["data final", "fim"]), date: findColumn(headers, ["data"]),
     target: findColumn(headers, ["meta", "limite"]), status: findColumn(headers, ["status", "situacao"]),
     volume: findColumn(headers, ["volume", "quantidade", "qtd", "pedidos"]),
+    numerator: findColumn(headers, ["numerador", "no prazo", "dentro do prazo", "entregues no prazo", "acertos"]),
+    denominator: findColumn(headers, ["denominador", "total de pedidos", "pedidos totais", "total pedidos", "entregas"]),
     value: findColumn(headers, ["percentual", "atingido", "resultado", "realizado", "utilizacao", "aderencia", "performance", "conformidade", "d 1", "nps", "%", "saldo", "quebra"]),
   };
   if (c.store < 0) c.store = 0;
@@ -506,6 +508,8 @@ function parseGeneric(rows, indicator) {
       date: c.date >= 0 ? excelDate(row[c.date]) : null,
       value, target: c.target >= 0 ? ratio(row[c.target]) : null,
       volume: c.volume >= 0 ? number(row[c.volume]) : null,
+      numerator: c.numerator >= 0 ? number(row[c.numerator]) : null,
+      denominator: c.denominator >= 0 ? number(row[c.denominator]) : null,
       statusSource: statusSource || null,
       raw: {
         ...Object.fromEntries(headers.map((header, index) => [String(header ?? `column_${index + 1}`), row[index]])),

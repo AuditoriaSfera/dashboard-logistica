@@ -230,6 +230,20 @@ const aggregateRows = (rows: RecordItem[], indicator: Pick<Indicator, "id" | "di
   const totalCount = indicator.id === "recebimento" ? valid.length : undefined;
   return { value, target, count: valid.length, lateCount, totalCount, status: statusFor(value, target, indicator.direction, statuses) };
 };
+const sourceGeneralValue = (
+  indicator: Pick<Indicator, "id" | "direction" | "configuredTarget" | "generalByCycle">,
+  rows: RecordItem[],
+): number | null => {
+  if (indicator.id !== "pec-omni" || !indicator.generalByCycle) return null;
+  const cycles = [...new Set(rows.map((row) => row.cycle).filter((cycle): cycle is number => cycle != null))]
+    .map(String)
+    .filter((cycle) => indicator.generalByCycle?.[cycle] != null);
+  if (!cycles.length) return null;
+  // O Resultado Geral é o número oficial publicado pela fonte para cada ciclo.
+  // Como a planilha não traz o denominador por ciclo, a consolidação histórica
+  // usa a média dos resultados oficiais dos ciclos, nunca a média das lojas.
+  return cycles.reduce((sum, cycle) => sum + Number(indicator.generalByCycle?.[cycle]), 0) / cycles.length;
+};
 const periodOf = (row: RecordItem) => row.cycle != null ? String(row.cycle) : row.date || "";
 const recomputeIndicator = (
   indicator: Pick<Indicator, "id" | "label" | "direction" | "configuredTarget" | "generalByCycle" | "records">, store: string[], cycle: string, startDate: string, endDate: string,
@@ -302,7 +316,10 @@ const recomputeIndicator = (
   const aggregate = aggregateRows(latestRows, indicator);
   const generalCycle = cycle || String(latestRows.map((row) => row.cycle).filter((value): value is number => value != null).sort((a, b) => a - b).at(-1) ?? "");
   const generalKeys = Object.keys(indicator.generalByCycle || {}).sort((a, b) => Number(a) - Number(b));
-  const generalValue = allCycles ? null : indicator.generalByCycle?.[generalCycle]
+  // O Resultado Geral da fonte representa todas as lojas. Com loja(s)
+  // selecionada(s), o dashboard precisa calcular apenas o recorte filtrado.
+  const sourceValue = store.length ? null : sourceGeneralValue(indicator, latestRows);
+  const generalValue = sourceValue ?? indicator.generalByCycle?.[generalCycle]
     ?? indicator.generalByCycle?.[generalKeys.filter((key) => Number(key) <= Number(generalCycle)).at(-1) || ""]
     ?? null;
   const generalAggregate = generalValue == null
