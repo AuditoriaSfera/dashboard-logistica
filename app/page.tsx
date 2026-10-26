@@ -382,8 +382,7 @@ function Filters({
   const sourceDates = Object.values(data.indicators).flatMap((item) => item.records.map((row) => dateOnly(row.date || row.periodEnd || row.periodStart))).filter((value): value is string => Boolean(value));
   const cycleDates = Object.values(CYCLE_PERIODS).flatMap((period) => [period.start, period.end]);
   const availableDates = [...sourceDates, ...cycleDates].sort();
-  const today = new Date();
-  const lastDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  const lastDate = sourceDates.sort().at(-1) || new Date().toISOString().slice(0, 10);
   const firstAvailableDate = availableDates[0] || "2026-01-01";
   const uniqueDates: string[] = [];
   for (let cursor = new Date(`${firstAvailableDate}T00:00:00`); cursor <= new Date(`${lastDate}T00:00:00`); cursor.setDate(cursor.getDate() + 1)) uniqueDates.push(cursor.toISOString().slice(0, 10));
