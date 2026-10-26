@@ -97,6 +97,13 @@ const formatDay = (value: string | null | undefined) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
   return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short" }).format(new Date(`${day}T00:00:00`));
 };
+const dateOnly = (value: unknown) => {
+  const text = String(value ?? "").trim();
+  const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const br = text.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  return br ? `${br[3]}-${br[2]}-${br[1]}` : null;
+};
 const auditActionLabel: Record<string, string> = {
   "session-start": "Entrou no dashboard", "session-end": "Saiu do dashboard",
   "view-open": "Entrou no menu", "view-close": "Saiu do menu", "orders-import": "Importou pedidos", "arruamento-import": "Importou arruamento",
@@ -228,7 +235,7 @@ const recomputeIndicator = (
   indicator: Pick<Indicator, "id" | "label" | "direction" | "configuredTarget" | "generalByCycle" | "records">, store: string[], cycle: string, startDate: string, endDate: string,
   allStores: Array<{ store: string; storeCode: string | null }>,
 ): Indicator => {
-  const recordDate = (row: RecordItem) => (row.date || row.periodEnd || row.periodStart || "").slice(0, 10);
+  const recordDate = (row: RecordItem) => dateOnly(row.date || row.periodEnd || row.periodStart);
   const cyclePeriod = cycle ? CYCLE_PERIODS[cycle] : null;
   // Para Trilogo o próprio ciclo da planilha já é a competência definida
   // pela abertura; não reaplicamos o intervalo visual do ciclo sobre ele.
@@ -280,8 +287,8 @@ const recomputeIndicator = (
   const historyRecords = indicator.records.filter((row) => {
     const date = recordDate(row);
     return matchesStores(store, row.store)
-      && (!startDate || Boolean(date) && date >= startDate)
-      && (!endDate || Boolean(date) && date <= endDate);
+      && (!startDate || (date !== null && date >= startDate))
+      && (!endDate || (date !== null && date <= endDate));
   });
   const grouped = new Map<string, RecordItem[]>();
   historyRecords.forEach((row) => { const key = periodOf(row); if (key) grouped.set(key, [...(grouped.get(key) || []), row]); });
@@ -372,7 +379,9 @@ function Filters({
   startDate: string; setStartDate: (v: string) => void; endDate: string; setEndDate: (v: string) => void;
   status: string; setStatus: (v: string) => void;
 }) {
-  const availableDates = Object.values(data.indicators).flatMap((item) => item.records.map((row) => (row.date || row.periodEnd || row.periodStart || "").slice(0, 10))).filter(Boolean).sort();
+  const sourceDates = Object.values(data.indicators).flatMap((item) => item.records.map((row) => dateOnly(row.date || row.periodEnd || row.periodStart))).filter((value): value is string => Boolean(value));
+  const cycleDates = Object.values(CYCLE_PERIODS).flatMap((period) => [period.start, period.end]);
+  const availableDates = [...sourceDates, ...cycleDates].sort();
   const today = new Date();
   const lastDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
   const firstAvailableDate = availableDates[0] || "2026-01-01";
