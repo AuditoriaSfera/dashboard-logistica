@@ -345,7 +345,8 @@ function AvailableDatePicker({ value, onChange, dates, placeholder }: { value: s
   const first = new Date(`${month}-01T00:00:00`);
   const days = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
   const offset = (first.getDay() + 6) % 7;
-  const monthLabel = first.toLocaleDateString("pt-BR", { month: "long" }) + " de " + first.getFullYear();
+  const monthLabelText = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(first);
+  const monthLabel = monthLabelText.charAt(0).toUpperCase() + monthLabelText.slice(1);
   const label = value ? new Date(`${value}T00:00:00`).toLocaleDateString("pt-BR") : placeholder;
   const shiftMonth = (delta: number) => { const index = months.indexOf(month); const next = months[index + delta]; if (next) setMonth(next); };
   const monthIndex = months.indexOf(month);

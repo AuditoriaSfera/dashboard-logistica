@@ -327,7 +327,7 @@ button:focus-visible, select:focus-visible { outline: 3px solid #9eb0f0; outline
 .date-picker-clear { border-bottom: 1px solid var(--line) !important; margin-bottom: 4px; font-weight: 700; }
 .calendar-menu { width: 250px; }
 .calendar-head { display: grid; grid-template-columns: 28px minmax(0, 1fr) 28px; align-items: center; text-align: center; margin: 4px 0 8px; }
-.calendar-head strong { min-width: 0; overflow: visible; white-space: nowrap; font-size: 11px; text-transform: capitalize; }
+.calendar-head strong { min-width: 0; overflow: visible; white-space: nowrap; font-size: 11px; line-height: 1.2; text-transform: none; }
 .calendar-head button { padding: 3px; text-align: center; font-size: 16px; }
 .calendar-weekdays, .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
 .calendar-weekdays span { text-align: center; color: var(--muted); font-size: 9px; font-weight: 700; text-transform: uppercase; }
