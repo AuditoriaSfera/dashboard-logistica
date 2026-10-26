@@ -382,8 +382,9 @@ function Filters({
   const sourceDates = Object.values(data.indicators).flatMap((item) => item.records.map((row) => dateOnly(row.date || row.periodEnd || row.periodStart))).filter((value): value is string => Boolean(value));
   const cycleDates = Object.values(CYCLE_PERIODS).flatMap((period) => [period.start, period.end]);
   const availableDates = [...sourceDates, ...cycleDates].sort();
-  const lastDate = sourceDates.sort().at(-1) || new Date().toISOString().slice(0, 10);
-  const firstAvailableDate = availableDates[0] || "2026-01-01";
+  const officialCycleDates = Object.values(CYCLE_PERIODS).sort((a, b) => a.start.localeCompare(b.start));
+  const firstAvailableDate = officialCycleDates[0]?.start || availableDates[0] || "2025-12-26";
+  const lastDate = [sourceDates.sort().at(-1), officialCycleDates.at(-1)?.end].filter(Boolean).sort().at(-1) || new Date().toISOString().slice(0, 10);
   const uniqueDates: string[] = [];
   for (let cursor = new Date(`${firstAvailableDate}T00:00:00`); cursor <= new Date(`${lastDate}T00:00:00`); cursor.setDate(cursor.getDate() + 1)) uniqueDates.push(cursor.toISOString().slice(0, 10));
   const setAvailableDate = (value: string, setter: (value: string) => void) => { if (!value || uniqueDates.includes(value)) setter(value); };
