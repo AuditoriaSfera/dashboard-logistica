@@ -234,15 +234,14 @@ const sourceGeneralValue = (
   indicator: Pick<Indicator, "id" | "direction" | "configuredTarget" | "generalByCycle">,
   rows: RecordItem[],
 ): number | null => {
-  if (indicator.id !== "pec-omni") return null;
-  // No consolidado do PEC, uma linha sem resultado ou com 0% não entra na
-  // média. Ela continua disponível no ranking para evidenciar a loja fora da
-  // meta, mas não pode distorcer o resultado geral do período.
-  const eligible = rows.filter((row) => row.value != null && Number(row.value) > 0);
-  const cycles = [...new Set(eligible.map((row) => row.cycle).filter((cycle): cycle is number => cycle != null))].map(String);
+  if (!indicator.generalByCycle) return null;
+  const cycles = [...new Set(rows.map((row) => row.cycle).filter((cycle): cycle is number => cycle != null))]
+    .map(String)
+    .filter((cycle) => indicator.generalByCycle?.[cycle] != null);
   if (!cycles.length) return null;
-  const cycleValues = cycles.map((cycle) => aggregateRows(eligible.filter((row) => String(row.cycle) === cycle), indicator).value)
-    .filter((value): value is number => value != null);
+  // O Resultado Geral da fonte é o valor oficial do ciclo. A consolidação
+  // histórica deve usar esses valores, nunca a média das linhas das lojas.
+  const cycleValues = cycles.map((cycle) => Number(indicator.generalByCycle?.[cycle]));
   return cycleValues.length ? cycleValues.reduce((sum, value) => sum + value, 0) / cycleValues.length : null;
 };
 const periodOf = (row: RecordItem) => row.cycle != null ? String(row.cycle) : row.date || "";
@@ -264,19 +263,22 @@ const recomputeIndicator = (
     const rowCyclePeriod = row.cycle != null ? CYCLE_PERIODS[String(row.cycle)] : null;
     let matchesCycle = true;
     if (cycle) {
-      // Retirada e Trilogo já trazem o ciclo atribuído pela planilha. Essa
-      // competência é a fonte oficial da apuração; a data continua disponível
-      // para filtros explícitos de período.
-      if (cycleUsesSourceColumn && row.cycle != null) matchesCycle = String(row.cycle) === cycle;
+      // Quando a linha traz o ciclo, ele é a competência oficial. Isso evita
+      // perder lojas quando a planilha possui datas de início inconsistentes.
+      if (row.cycle != null) matchesCycle = String(row.cycle) === cycle;
       else if (date) matchesCycle = date >= cyclePeriod!.start && date <= cyclePeriod!.end;
       else matchesCycle = row.cycle != null && String(row.cycle) === cycle;
     }
     const dateForStart = date || rowCyclePeriod?.end || "";
     const dateForEnd = date || rowCyclePeriod?.start || "";
+    const cycleDateStart = cycle && row.cycle == null ? cycleStart : "";
+    const cycleDateEnd = cycle && row.cycle == null ? cycleEnd : "";
+    const rowStart = [startDate, cycleDateStart].filter(Boolean).sort().at(-1) || "";
+    const rowEnd = [endDate, cycleDateEnd].filter(Boolean).sort().at(0) || "";
     return matchesStores(store, row.store)
       && matchesCycle
-      && (!effectiveStart || Boolean(dateForStart) && dateForStart >= effectiveStart)
-      && (!effectiveEnd || Boolean(dateForEnd) && dateForEnd <= effectiveEnd);
+      && (!rowStart || Boolean(dateForStart) && dateForStart >= rowStart)
+      && (!rowEnd || Boolean(dateForEnd) && dateForEnd <= rowEnd);
   });
   const hasDateFilter = Boolean(effectiveStart || effectiveEnd);
   const cycleRows = records.filter((row) => row.cycle != null);
@@ -323,9 +325,7 @@ const recomputeIndicator = (
   // O Resultado Geral da fonte representa todas as lojas. Com loja(s)
   // selecionada(s), o dashboard precisa calcular apenas o recorte filtrado.
   const sourceValue = store.length ? null : sourceGeneralValue(indicator, latestRows);
-  const generalValue = indicator.id === "pec-omni" && !store.length
-    ? sourceValue
-    : indicator.generalByCycle?.[generalCycle]
+  const generalValue = sourceValue ?? indicator.generalByCycle?.[generalCycle]
     ?? indicator.generalByCycle?.[generalKeys.filter((key) => Number(key) <= Number(generalCycle)).at(-1) || ""]
     ?? null;
   const generalAggregate = generalValue == null
