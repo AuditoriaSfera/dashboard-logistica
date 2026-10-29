@@ -613,9 +613,14 @@ function IndicatorDetailTable({ indicator, onStore, currentUser, cycle }: { indi
 function indicatorScopeLabel(indicator: Indicator, cycle: string, startDate: string, endDate: string) {
   const inferredCycle = cycle || (typeof indicator.latestKey === "string" && /^Ciclo \d+$/.test(indicator.latestKey) ? indicator.latestKey.replace("Ciclo ", "") : "");
   const cyclePeriod = inferredCycle ? CYCLE_PERIODS[inferredCycle] : null;
-  const dates = indicator.records.map((row) => (row.date || row.periodStart || row.periodEnd || "").slice(0, 10)).filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value)).sort();
-  const sourceStart = dates[0] || "";
-  const sourceEnd = dates.at(-1) || "";
+  // Para indicadores por período, `date` normalmente representa a data final.
+  // O rótulo precisa usar explicitamente o início e o fim da competência;
+  // caso contrário, a Medallia começa visualmente em 18/01, que é o fim do
+  // ciclo 1, embora o período tenha começado em 26/12.
+  const starts = indicator.records.map((row) => (row.periodStart || row.date || row.periodEnd || "").slice(0, 10)).filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value)).sort();
+  const ends = indicator.records.map((row) => (row.periodEnd || row.date || row.periodStart || "").slice(0, 10)).filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value)).sort();
+  const sourceStart = starts[0] || "";
+  const sourceEnd = ends.at(-1) || "";
   const effectiveStart = cyclePeriod?.start || [sourceStart, startDate].filter(Boolean).sort().at(-1) || sourceStart;
   const effectiveEnd = cyclePeriod?.end || [sourceEnd, endDate].filter(Boolean).sort().at(0) || sourceEnd;
   const range = effectiveStart && effectiveEnd ? `${formatDay(effectiveStart)} a ${formatDay(effectiveEnd)}` : "período disponível";
