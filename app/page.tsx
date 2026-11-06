@@ -611,8 +611,9 @@ function IndicatorDetailTable({ indicator, onStore, currentUser, cycle }: { indi
   return <div className="indicator-detail-table-wrap"><table className="indicator-detail-table"><thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{rows.map((row) => { const item = detail(row); const receiving = indicator.id === "recebimento"; const stockBreak = indicator.id === "quebra-estoque"; const arrangement = indicator.id === "arruamento"; return <tr key={row.store}><th><button onClick={() => onStore(row.store)}><span>{row.store}</span><small>{row.storeCode || "Código não informado"}</small></button></th>{arrangement ? <><td><strong>{item.skuTotal}</strong></td><td><strong>{item.arranged}</strong></td><td><strong>{item.withoutArrangement}</strong></td></> : <td><strong>{item.primary}</strong>{item.secondary && <small>{item.secondary}</small>}</td>}{receiving && <td><strong>{item.volumes}</strong><small>{item.weeklyVolumes ? `Média ${item.weeklyVolumes}` : ""}</small></td>}{receiving && <td><strong>{item.late}</strong></td>}{stockBreak && <td><strong>{item.sold}</strong></td>}<td><strong>{indicator.id === "retirada" ? integer.format(row.count) : formatValue(row.value, indicator.id)}</strong><small>{row.target == null ? "Sem meta" : `Meta: ${formatTarget(indicator.id, row.target)}`}</small></td><td><Badge status={row.status} informational={isInformational(indicator.id)} /></td>{arrangement && <td><ArruamentoWorkbookAction store={row.store} storeCode={row.storeCode} cycle={workbookCycle} currentUser={currentUser} /></td>}</tr>; })}</tbody></table>{!rows.length && <p className="muted">Nenhuma loja disponível neste recorte.</p>}</div>;
 }
 
-function indicatorScopeLabel(indicator: Indicator, cycle: string, startDate: string, endDate: string) {
-  const inferredCycle = cycle || (typeof indicator.latestKey === "string" && /^Ciclo \d+$/.test(indicator.latestKey) ? indicator.latestKey.replace("Ciclo ", "") : "");
+function indicatorScopeInfo(indicator: Indicator, cycle: string, startDate: string, endDate: string) {
+  const latestSourceCycle = indicator.records.map((row) => row.cycle).filter((value): value is number => value != null).sort((a, b) => a - b).at(-1);
+  const inferredCycle = cycle || (latestSourceCycle != null ? String(latestSourceCycle) : typeof indicator.latestKey === "string" && /^Ciclo \d+$/.test(indicator.latestKey) ? indicator.latestKey.replace("Ciclo ", "") : "");
   const cyclePeriod = inferredCycle ? CYCLE_PERIODS[inferredCycle] : null;
   // Para indicadores por período, `date` normalmente representa a data final.
   // O rótulo precisa usar explicitamente o início e o fim da competência;
@@ -623,13 +624,26 @@ function indicatorScopeLabel(indicator: Indicator, cycle: string, startDate: str
   const sourceStart = starts[0] || "";
   const sourceEnd = ends.at(-1) || "";
   const effectiveStart = cyclePeriod?.start || [sourceStart, startDate].filter(Boolean).sort().at(-1) || sourceStart;
-  const effectiveEnd = cyclePeriod?.end || [sourceEnd, endDate].filter(Boolean).sort().at(0) || sourceEnd;
-  const range = effectiveStart && effectiveEnd ? `${formatDay(effectiveStart)} a ${formatDay(effectiveEnd)}` : "período disponível";
-  return `${inferredCycle ? `Ciclo ${inferredCycle}` : "Todos os ciclos"} · ${range}`;
+  const coveredEnd = [sourceEnd, endDate].filter(Boolean).sort().at(0) || sourceEnd;
+  const expectedEnd = cyclePeriod?.end || "";
+  const range = effectiveStart && coveredEnd ? `${formatDay(effectiveStart)} a ${formatDay(coveredEnd)}` : effectiveStart ? `${formatDay(effectiveStart)} a dados disponíveis` : "período disponível";
+  const today = new Date();
+  const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  const partial = Boolean(expectedEnd && todayIso < expectedEnd);
+  return {
+    label: `${cycle ? `Ciclo ${inferredCycle}` : "Todos os ciclos"} · ${range}`,
+    partial,
+    coveredEnd,
+    expectedEnd,
+  };
 }
 
 function RankingSummary({ indicator, cycle = "", startDate = "", endDate = "" }: { indicator: Indicator; cycle?: string; startDate?: string; endDate?: string }) {
-  const periodNote = <p className="ranking-period">Período do resultado: <strong>{indicatorScopeLabel(indicator, cycle, startDate, endDate)}</strong></p>;
+  const scope = indicatorScopeInfo(indicator, cycle, startDate, endDate);
+  const periodNote = <>
+    <p className="ranking-period">Período do resultado: <strong>{scope.label}</strong></p>
+    {scope.partial && <p className="ranking-period ranking-period-partial" role="status"><strong>Resultado parcial — ciclo em andamento.</strong> Dados considerados até {formatDay(scope.coveredEnd) || "o momento"}; fechamento previsto para {formatDay(scope.expectedEnd)}.</p>}
+  </>;
   if (indicator.id === "recebimento") {
     const receivedNfs = indicator.records.length;
     const lateNfs = indicator.records.filter((item) => item.value === 0).length;

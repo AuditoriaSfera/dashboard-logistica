@@ -100,6 +100,8 @@ button:focus-visible, select:focus-visible { outline: 3px solid #9eb0f0; outline
 .kpi-period { margin-left: 6px; color: var(--muted); font-size: 10px; font-weight: 500; white-space: nowrap; }
 .ranking-period { margin: -2px 0 4px; color: var(--muted); font-size: 12px; }
 .ranking-period strong { color: #25324a; font-weight: 700; }
+.ranking-period-partial { color: #8a5314; background: #fff6e7; border: 1px solid #f2d39c; border-radius: 6px; padding: 7px 9px; }
+.ranking-period-partial strong { color: #8a5314; }
 .kpi-meta, .kpi-delta { font-size: 11px; color: var(--muted); }
 .kpi-arrow { position: absolute; right: 15px; top: 15px; color: #aab3c4; }
 .has-note { font-size: 10px; color: #82501a; background: #fff6e7; padding: 4px 7px; border-radius: 5px; }
