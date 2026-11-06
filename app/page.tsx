@@ -629,10 +629,14 @@ function indicatorScopeInfo(indicator: Indicator, cycle: string, startDate: stri
   const range = effectiveStart && coveredEnd ? `${formatDay(effectiveStart)} a ${formatDay(coveredEnd)}` : effectiveStart ? `${formatDay(effectiveStart)} a sem dados` : "período disponível";
   const today = new Date();
   const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-  const partial = Boolean(expectedEnd && todayIso < expectedEnd);
+  const cycleInProgress = Boolean(expectedEnd && todayIso < expectedEnd);
+  const sourceCoverageIncomplete = Boolean(expectedEnd && (!coveredEnd || coveredEnd < expectedEnd));
   return {
     label: `${cycle ? `Ciclo ${inferredCycle}` : "Todos os ciclos"} · ${range}`,
-    partial,
+    partial: cycleInProgress || sourceCoverageIncomplete,
+    partialMessage: cycleInProgress
+      ? "Resultado parcial — ciclo em andamento."
+      : "Resultado parcial — a planilha ainda não cobre todo o ciclo.",
     coveredEnd,
     expectedEnd,
   };
@@ -642,7 +646,7 @@ function RankingSummary({ indicator, cycle = "", startDate = "", endDate = "" }:
   const scope = indicatorScopeInfo(indicator, cycle, startDate, endDate);
   const periodNote = <>
     <p className="ranking-period">Período do resultado: <strong>{scope.label}</strong></p>
-    {scope.partial && <p className="ranking-period ranking-period-partial" role="status"><strong>Resultado parcial — ciclo em andamento.</strong> Dados considerados até {formatDay(scope.coveredEnd) || "o momento"}; fechamento previsto para {formatDay(scope.expectedEnd)}.</p>}
+    {scope.partial && <p className="ranking-period ranking-period-partial" role="status"><strong>{scope.partialMessage}</strong> Dados considerados até {formatDay(scope.coveredEnd) || "o momento"}; data final oficial do ciclo: {formatDay(scope.expectedEnd)}.</p>}
   </>;
   if (indicator.id === "recebimento") {
     const receivedNfs = indicator.records.length;
