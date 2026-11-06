@@ -28,7 +28,7 @@ const projectFile = (...segments) => path.join(projectRoot, ...segments);
 
 const metricConfig = JSON.parse(fs.readFileSync(projectFile("config", "metrics.json"), "utf8"));
 let ordersMemo = null;
-const ZERO_WHEN_ABSENT = new Set(["retirada", "trilogo"]);
+const ZERO_WHEN_ABSENT = new Set(["retirada", "trilogo", "arruamento"]);
 export const INDICATORS = Object.entries(metricConfig).map(([id, config]) => ({
   id, label: config.label, direction: config.direction, alias: config.sheetAlias,
   configuredTarget: config.target, scoreWeight: config.scoreWeight, unit: config.unit ?? "percent",
@@ -564,9 +564,11 @@ const aggregate = (rows, indicator) => {
   const target = targets.length
     ? targets.reduce((sum, item) => sum + item, 0) / targets.length
     : indicator.configuredTarget ?? null;
+  const status = value === 0 && !valid.length && indicator.id === "arruamento"
+    ? "unknown"
+    : statusFor(value, target, indicator.direction, valid.map((row) => row.statusSource).find(Boolean));
   return {
-    value, target, count: valid.length,
-    status: statusFor(value, target, indicator.direction, valid.map((row) => row.statusSource).find(Boolean)),
+    value, target, count: valid.length, status,
   };
 };
 

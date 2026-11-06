@@ -73,7 +73,7 @@ const percent = new Intl.NumberFormat("pt-BR", { style: "percent", maximumFracti
 const integer = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 });
 const shortDate = new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" });
 const COUNT_INDICATORS = new Set(["retirada", "trilogo"]);
-const ZERO_WHEN_ABSENT = new Set(["retirada", "trilogo"]);
+const ZERO_WHEN_ABSENT = new Set(["retirada", "trilogo", "arruamento"]);
 const INFORMATIONAL_INDICATORS = new Set<string>();
 const DETAILED_INDICATORS = new Set(["arruamento", "recebimento", "retirada", "trilogo", "quebra-estoque"]);
 const CYCLE_PERIODS = cyclePeriodsSource as Record<string, { start: string; end: string }>;
@@ -228,7 +228,7 @@ const aggregateRows = (rows: RecordItem[], indicator: Pick<Indicator, "id" | "di
   const statuses = valid.map((row) => row.statusSource).filter(Boolean).join(" | ");
   const lateCount = indicator.id === "recebimento" ? valid.filter((row) => row.value === 0).length : undefined;
   const totalCount = indicator.id === "recebimento" ? valid.length : undefined;
-  return { value, target, count: valid.length, lateCount, totalCount, status: statusFor(value, target, indicator.direction, statuses) };
+  return { value, target, count: valid.length, lateCount, totalCount, status: value === 0 && !valid.length && indicator.id === "arruamento" ? "unknown" : statusFor(value, target, indicator.direction, statuses) };
 };
 const sourceGeneralValue = (
   indicator: Pick<Indicator, "id" | "direction" | "configuredTarget" | "generalByCycle">,
@@ -309,9 +309,10 @@ const recomputeIndicator = (
   });
   const grouped = new Map<string, RecordItem[]>();
   historyRecords.forEach((row) => { const key = periodOf(row); if (key) grouped.set(key, [...(grouped.get(key) || []), row]); });
-  const trend = [...grouped.entries()]
-    .sort(([a], [b]) => Number.isFinite(Number(a)) && Number.isFinite(Number(b)) ? Number(a) - Number(b) : a.localeCompare(b))
-    .map(([period, rows]) => ({ period, ...aggregateRows(rows, indicator) }));
+  const trendPeriods = indicator.id === "arruamento"
+    ? cycleOptions
+    : [...grouped.keys()].sort((a, b) => Number.isFinite(Number(a)) && Number.isFinite(Number(b)) ? Number(a) - Number(b) : a.localeCompare(b));
+  const trend = trendPeriods.map((period) => ({ period, ...aggregateRows(grouped.get(period) || [], indicator) }));
   const byStore = new Map<string, RecordItem[]>();
   latestRows.forEach((row) => { if (row.store) byStore.set(row.store, [...(byStore.get(row.store) || []), row]); });
   const ranking = allStores.map(({ store: name, storeCode }) => ({ store: name, storeCode, ...aggregateRows(byStore.get(name) || [], indicator) }))
