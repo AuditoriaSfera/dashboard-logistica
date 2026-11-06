@@ -73,7 +73,7 @@ const percent = new Intl.NumberFormat("pt-BR", { style: "percent", maximumFracti
 const integer = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 });
 const shortDate = new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" });
 const COUNT_INDICATORS = new Set(["retirada", "trilogo"]);
-const ZERO_WHEN_ABSENT = new Set(["retirada", "trilogo", "arruamento"]);
+const ZERO_WHEN_ABSENT = new Set(["retirada", "trilogo"]);
 const INFORMATIONAL_INDICATORS = new Set<string>();
 const DETAILED_INDICATORS = new Set(["arruamento", "recebimento", "retirada", "trilogo", "quebra-estoque"]);
 const CYCLE_PERIODS = cyclePeriodsSource as Record<string, { start: string; end: string }>;
@@ -228,7 +228,7 @@ const aggregateRows = (rows: RecordItem[], indicator: Pick<Indicator, "id" | "di
   const statuses = valid.map((row) => row.statusSource).filter(Boolean).join(" | ");
   const lateCount = indicator.id === "recebimento" ? valid.filter((row) => row.value === 0).length : undefined;
   const totalCount = indicator.id === "recebimento" ? valid.length : undefined;
-  return { value, target, count: valid.length, lateCount, totalCount, status: value === 0 && !valid.length && indicator.id === "arruamento" ? "unknown" : statusFor(value, target, indicator.direction, statuses) };
+  return { value, target, count: valid.length, lateCount, totalCount, status: statusFor(value, target, indicator.direction, statuses) };
 };
 const sourceGeneralValue = (
   indicator: Pick<Indicator, "id" | "direction" | "configuredTarget" | "generalByCycle">,
@@ -626,7 +626,7 @@ function indicatorScopeInfo(indicator: Indicator, cycle: string, startDate: stri
   const effectiveStart = cyclePeriod?.start || [sourceStart, startDate].filter(Boolean).sort().at(-1) || sourceStart;
   const coveredEnd = [sourceEnd, endDate].filter(Boolean).sort().at(0) || sourceEnd;
   const expectedEnd = cyclePeriod?.end || "";
-  const range = effectiveStart && coveredEnd ? `${formatDay(effectiveStart)} a ${formatDay(coveredEnd)}` : effectiveStart ? `${formatDay(effectiveStart)} a dados disponíveis` : "período disponível";
+  const range = effectiveStart && coveredEnd ? `${formatDay(effectiveStart)} a ${formatDay(coveredEnd)}` : effectiveStart ? `${formatDay(effectiveStart)} a sem dados` : "período disponível";
   const today = new Date();
   const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
   const partial = Boolean(expectedEnd && todayIso < expectedEnd);

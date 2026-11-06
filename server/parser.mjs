@@ -28,7 +28,7 @@ const projectFile = (...segments) => path.join(projectRoot, ...segments);
 
 const metricConfig = JSON.parse(fs.readFileSync(projectFile("config", "metrics.json"), "utf8"));
 let ordersMemo = null;
-const ZERO_WHEN_ABSENT = new Set(["retirada", "trilogo", "arruamento"]);
+const ZERO_WHEN_ABSENT = new Set(["retirada", "trilogo"]);
 export const INDICATORS = Object.entries(metricConfig).map(([id, config]) => ({
   id, label: config.label, direction: config.direction, alias: config.sheetAlias,
   configuredTarget: config.target, scoreWeight: config.scoreWeight, unit: config.unit ?? "percent",
@@ -461,8 +461,8 @@ function parseGeneric(rows, indicator) {
   const headers = rows[h] ?? [];
   const c = {
     cycle: findColumn(headers, ["ciclo"]), code: findColumn(headers, ["codigo", "cod loja"]),
-    store: findColumn(headers, ["loja", "filial"]), start: findColumn(headers, ["data inicio", "inicio"]),
-    end: findColumn(headers, ["data final", "fim"]), date: findColumn(headers, ["data"]),
+    store: findColumn(headers, ["loja", "filial"]), start: findColumn(headers, ["data inicio", "periodo inicial", "inicio"]),
+    end: findColumn(headers, ["data final", "periodo final", "fim"]), date: findColumn(headers, ["data"]),
     target: findColumn(headers, ["meta", "limite"]), status: findColumn(headers, ["status", "situacao"]),
     volume: findColumn(headers, ["volume", "quantidade", "qtd", "pedidos"]),
     numerator: findColumn(headers, ["numerador", "no prazo", "dentro do prazo", "entregues no prazo", "acertos"]),
@@ -494,7 +494,13 @@ function parseGeneric(rows, indicator) {
       if (status.includes("dentro") || status.includes("conforme")) value = 1;
       else if (status.includes("fora") || status.includes("nao conforme")) value = 0;
     }
-    if (value == null) {
+    if (value == null && indicator.id === "arruamento") {
+      // A aba de Arruamento pode trazer a loja e o ciclo antes de preencher
+      // as colunas de apuração. Não use o último número da linha como
+      // percentual: em ciclos vazios ele costuma ser o próprio número do
+      // ciclo (por exemplo, 15), que viraria 15% incorretamente.
+      value = null;
+    } else if (value == null) {
       const candidate = row.map(number).findLast((item) => item != null);
       if (candidate == null) return [];
       value = indicator.id === "saldo-pedidos" ? candidate : ratio(candidate);
