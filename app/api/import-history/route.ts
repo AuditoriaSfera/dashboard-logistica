@@ -16,7 +16,8 @@ export async function GET(request: Request) {
   }
   try {
     const limit = new URL(request.url).searchParams.get("limit") || "1000";
-    const imports = await loadImportHistory(getSql(), Number(limit));
+    const imports = (await loadImportHistory(getSql(), Number(limit)))
+      .filter((item: { sourceType: string }) => item.sourceType === "indicators");
     return NextResponse.json({ imports }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Não foi possível carregar o histórico de importações." }, { status: 503 });

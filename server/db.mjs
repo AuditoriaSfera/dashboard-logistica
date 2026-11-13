@@ -388,7 +388,7 @@ export async function loadImportHistory(sql, limit = 1000) {
   const safeLimit = Math.min(5000, Math.max(1, Number(limit) || 1000));
   const rows = await sql`
     select id, source_type, file_name, imported_at, source_modified_at, imported_by, record_count, note, snapshot, is_baseline
-    from public.import_history order by imported_at desc, id desc limit ${safeLimit}`;
+    from public.import_history where source_type = 'indicators' order by imported_at desc, id desc limit ${safeLimit}`;
   return rows.map((row) => ({
     id: String(row.id), sourceType: row.source_type, fileName: row.file_name,
     importedAt: row.imported_at?.toISOString?.() ?? String(row.imported_at),
