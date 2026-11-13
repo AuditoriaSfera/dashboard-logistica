@@ -44,7 +44,12 @@ app.post("/api/orders/upload", express.raw({ type: () => true, limit: "300mb" })
     fs.writeFileSync(new URL("../data/ultima-importacao-pedidos.json", import.meta.url), JSON.stringify({ importedAt: new Date().toISOString(), fileName: originalName }));
     if (next.orders && !next.orders.error) {
       await syncToDatabase(cache, "upload de pedidos");
-      if (databaseConfigured()) await logOrderImport(getSql(), { fileName: originalName, recordCount: next.orders.records?.length ?? null }).catch((error) => console.error("[banco] Falha ao registrar a importação:", error?.code || error?.message));
+      if (databaseConfigured()) await logOrderImport(getSql(), {
+        fileName: originalName,
+        recordCount: next.orders.records?.length ?? null,
+        snapshot: next.orders,
+        sourceModifiedAt: next.orders.source?.modifiedAt || null,
+      }).catch((error) => console.error("[banco] Falha ao registrar a importação:", error?.code || error?.message));
     }
     if (next.orders?.error) return response.status(400).json({ error: next.orders.error });
     response.json({ ok: true, fileName: next.orders?.source?.fileName || "pedidos-importados.xlsx" });

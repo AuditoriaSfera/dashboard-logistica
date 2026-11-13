@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle, BarChart3, Building2, ChevronRight, CircleGauge, ClipboardList, Database,
-  Download, FileSpreadsheet, LayoutDashboard, Menu, RefreshCw, Settings, Store, Trophy, Upload, UserCircle, Users, X,
+  Download, FileSpreadsheet, History, LayoutDashboard, Menu, RefreshCw, Settings, Store, Trophy, Upload, UserCircle, Users, X,
 } from "lucide-react";
 import {
   Bar, BarChart, CartesianGrid, Line, LineChart,
@@ -13,6 +13,7 @@ import cyclePeriodsSource from "../config/cycles.json";
 import * as XLSX from "xlsx";
 import { AccessUser, authRequest } from "./auth-client";
 import { AuthScreen, PasswordChangeScreen, CadastroView } from "./access-components";
+import { ImportHistoryView, type ImportHistoryEntry } from "./import-history-view";
 
 // O serviço auxiliar só existe no ambiente local. Fora do computador de
 // desenvolvimento, as atualizações devem usar as rotas same-origin do app.
@@ -115,7 +116,7 @@ const auditEntityLabel: Record<string, string> = {
 const auditViewLabel = (view: string, indicatorId: string, indicators: Array<{ id: string; label: string }>) => {
   if (view === "indicator") return indicators.find((item) => item.id === indicatorId)?.label || "Indicador";
   if (view === "store") return "Visão 360° por loja";
-  return ({ overview: "Visão Geral", stores: "360° Por Loja", ranking: "Ranking", performance: "Pedidos", recurrence: "Recorrência", quality: "Qualidade dos dados", cadastro: "Usuários", profile: "Meu perfil", settings: "Configurações", audit: "Auditoria" } as Record<string, string>)[view] || view;
+  return ({ overview: "Visão Geral", stores: "360° Por Loja", ranking: "Ranking", performance: "Pedidos", recurrence: "Recorrência", quality: "Qualidade dos dados", cadastro: "Usuários", profile: "Meu perfil", settings: "Configurações", audit: "Auditoria", history: "Histórico" } as Record<string, string>)[view] || view;
 };
 function auditDetails(event: AuditEvent) {
   const metadata = event.metadata || {};
@@ -859,6 +860,10 @@ export default function Home() {
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditError, setAuditError] = useState("");
+  const [importHistory, setImportHistory] = useState<ImportHistoryEntry[]>([]);
+  const [importHistoryLoading, setImportHistoryLoading] = useState(false);
+  const [importHistoryError, setImportHistoryError] = useState("");
+  const [importHistoryWarning, setImportHistoryWarning] = useState("");
   const [error, setError] = useState("");
   const [sourceWarning, setSourceWarning] = useState("");
   // X-Data-Source (rota /api/dashboard): avisa quando o banco está configurado mas os dados vieram dos arquivos antigos.
@@ -879,7 +884,7 @@ export default function Home() {
   const [activeStore, setActiveStore] = useState("");
   const [currentUser, setCurrentUser] = useState<AccessUser | null>(null);
   useEffect(() => {
-    if (currentUser && currentUser.accountType !== "admin" && ["performance", "recurrence", "quality", "cadastro", "settings", "audit"].includes(view)) setView("overview");
+    if (currentUser && currentUser.accountType !== "admin" && ["performance", "recurrence", "quality", "cadastro", "settings", "audit", "history"].includes(view)) setView("overview");
   }, [currentUser, view]);
   const [authError, setAuthError] = useState("");
   const [authReady, setAuthReady] = useState(false);
@@ -1017,6 +1022,20 @@ export default function Home() {
     finally { setAuditLoading(false); }
   }, [currentUser?.accountType]);
 
+  const loadImportHistory = useCallback(async () => {
+    if (currentUser?.accountType !== "admin") return;
+    setImportHistoryLoading(true); setImportHistoryError(""); setImportHistoryWarning("");
+    try {
+      const response = await fetch("/api/import-history?limit=1000", { cache: "no-store" });
+      const body = await response.json() as { imports?: ImportHistoryEntry[]; warning?: string; error?: string };
+      if (!response.ok) throw new Error(body.error || "Não foi possível carregar o histórico de importações.");
+      setImportHistory(Array.isArray(body.imports) ? body.imports : []);
+      setImportHistoryWarning(body.warning || "");
+    } catch (caught) {
+      setImportHistoryError(caught instanceof Error ? caught.message : "Falha ao carregar o histórico de importações.");
+    } finally { setImportHistoryLoading(false); }
+  }, [currentUser?.accountType]);
+
   const uploadWorkbook = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -1064,6 +1083,7 @@ export default function Home() {
   }, [view, data, recurrenceRecords.length]);
 
   useEffect(() => { if (view === "audit") void loadAudit(); }, [view, loadAudit]);
+  useEffect(() => { if (view === "history") void loadImportHistory(); }, [view, loadImportHistory]);
 
   const workingData = useMemo(() => {
     if (!data) return null;
@@ -1129,9 +1149,9 @@ export default function Home() {
     const nav = [
     ["overview", "Visão Geral", LayoutDashboard], ["stores", "360° Por Loja", Store],
     ["ranking", "Ranking", Trophy], ["performance", "Pedidos", CircleGauge], ["recurrence", "Recorrência", Users],
-    ["quality", "Qualidade dos dados", Database], ["cadastro", "Usuários", Users], ["profile", "Meu perfil", UserCircle], ["settings", "Configurações", Settings], ["audit", "Auditoria", ClipboardList],
+    ["quality", "Qualidade dos dados", Database], ["cadastro", "Usuários", Users], ["profile", "Meu perfil", UserCircle], ["settings", "Configurações", Settings], ["audit", "Auditoria", ClipboardList], ["history", "Histórico", History],
   ] as const;
-    const restrictedViews = new Set(["performance", "recurrence", "quality", "cadastro", "settings", "audit"]);
+    const restrictedViews = new Set(["performance", "recurrence", "quality", "cadastro", "settings", "audit", "history"]);
 
   if (!authReady) return <main className="fatal"><RefreshCw className="spin" size={36} /><h1>Preparando acesso</h1></main>;
   if (authError && !currentUser) return <main className="fatal"><h1>Não foi possível verificar o acesso</h1><p>{authError}</p><button onClick={() => void refreshSession()}>Tentar novamente</button></main>;
@@ -1158,7 +1178,7 @@ export default function Home() {
         {error && <p className="error-text" role="alert">{error}</p>}
         {sourceWarning && <p className="error-text" role="status">{sourceWarning}</p>}
 
-        <Filters data={data} store={store} setStore={setStore} cycle={cycle} setCycle={setCycle} startDate={startDate} setStartDate={setStartDate} endDate={endDate} setEndDate={setEndDate} indicator={indicatorFilter} setIndicator={setIndicatorFilter} status={statusFilter} setStatus={setStatusFilter} />
+        {view !== "history" && <Filters data={data} store={store} setStore={setStore} cycle={cycle} setCycle={setCycle} startDate={startDate} setStartDate={setStartDate} endDate={endDate} setEndDate={setEndDate} indicator={indicatorFilter} setIndicator={setIndicatorFilter} status={statusFilter} setStatus={setStatusFilter} />}
 
         <div className="content">
           {authError && <p className="auth-message access-error" role="alert">{authError}</p>}
@@ -1219,6 +1239,8 @@ export default function Home() {
           {view === "quality" && <><section className="page-head"><div><span className="eyebrow">Governança</span><h1>Qualidade dos Dados</h1><p>Diagnóstico claro da fonte: o que está errado, onde está, impacto, correção e status.</p></div><span className="data-chip">Fonte: {data.source.fileName}</span></section><section className="summary-grid four"><article><span>Críticos</span><strong>{data.quality.summary.critical || 0}</strong><small>Impedem cálculo confiável</small></article><article><span>Altos</span><strong>{data.quality.summary.high || 0}</strong><small>Podem distorcer resultados</small></article><article><span>Médios</span><strong>{data.quality.summary.medium || 0}</strong><small>Exigem correção planejada</small></article><article><span>Em aberto</span><strong>{data.quality.issues.filter((item) => item.status !== "resolved").length}</strong><small>Problemas ainda não resolvidos</small></article></section><section className="panel quality-source"><div className="section-title"><div><h2>Origem analisada</h2><p>Abas encontradas no último processamento.</p></div><span className="table-hint">{data.quality.workbookSheets?.length || 0} abas</span></div><div className="quality-sheet-list">{(data.quality.workbookSheets || []).map((sheet) => <span key={sheet}>{sheet}</span>)}</div></section><section className="panel quality-issues"><div className="section-title"><div><h2>Diagnóstico dos problemas</h2><p>Cada ocorrência informa o local, impacto, correção sugerida e status.</p></div><span className="table-hint">{data.quality.issues.length} ocorrências</span></div>{data.quality.issues.length ? <div className="quality-issue-list">{data.quality.issues.slice(0, 200).map((item, index) => <article className="quality-issue" key={`${item.code}-${item.message}-${index}`}><div className="quality-issue-head"><span className={`severity ${item.severity}`}>{item.severity}</span><span className={`quality-status ${item.status === "resolved" ? "resolved" : "open"}`}>{item.status === "resolved" ? "Resolvido" : "Em aberto"}</span><strong>{item.message}</strong></div><dl><div><dt>Problema</dt><dd>{item.code}</dd></div><div><dt>Aba / origem</dt><dd>{item.sourceSheet || (item.indicator ? data.indicators[item.indicator]?.label : "Planilha / estrutura")}</dd></div><div><dt>Impacto</dt><dd>{item.impact || "Pode afetar a confiabilidade do recorte."}</dd></div><div><dt>Como resolver</dt><dd>{item.resolution || "Verificar o registro na planilha e importar novamente."}</dd></div>{item.store && <div><dt>Loja afetada</dt><dd>{item.store}</dd></div>}</dl>{item.duplicateRecords?.length ? <div className="quality-evidence"><h4>Registros encontrados</h4><div className="table-wrap"><table><thead><tr><th>Linha</th><th>Loja</th><th>Ciclo</th><th>Data</th><th>Valor</th></tr></thead><tbody>{item.duplicateRecords.map((record, recordIndex) => <tr key={recordIndex}><td>{record.line || "—"}</td><td>{record.store || "—"}</td><td>{record.cycle || "—"}</td><td>{formatDay(record.date) || "—"}</td><td>{record.value == null ? "—" : formatValue(record.value, item.indicator)}</td></tr>)}</tbody></table></div></div> : null}</article>)}</div> : <div className="quality-empty"><strong>Nenhum problema identificado</strong><p>A última leitura não encontrou inconsistências registradas.</p></div>}</section></>}
 
           {view === "audit" && currentUser.accountType === "admin" && <AuditView events={auditEvents} loading={auditLoading} error={auditError} onReload={() => void loadAudit()} />}
+
+          {view === "history" && currentUser.accountType === "admin" && <ImportHistoryView imports={importHistory} loading={importHistoryLoading} error={importHistoryError} warning={importHistoryWarning} onReload={() => void loadImportHistory()} />}
 
           {view === "cadastro" && currentUser.accountType === "admin" && <CadastroView stores={data.stores.map(({ store, storeCode }) => ({ store, storeCode }))} currentUser={currentUser} onSessionChange={refreshSession} />}
 

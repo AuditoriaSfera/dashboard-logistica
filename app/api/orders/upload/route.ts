@@ -123,7 +123,14 @@ export async function POST(request: Request) {
     const imported = await importStreamedRecords(recordFile, sql, parsed, previousRecords, previousSummary);
     const orders = imported.orders;
     await saveOrdersSnapshotToDatabase(sql, orders);
-    await logOrderImport(sql, { fileName, recordCount: imported.imported, importedBy: null, note: replacesHistory ? `Snapshot anual; histórico anterior substituído. ${imported.ignored} duplicidades internas ignoradas.` : `Importação online; ${imported.ignored} duplicidades ignoradas.` });
+    await logOrderImport(sql, {
+      fileName,
+      recordCount: imported.imported,
+      importedBy: access.user.email,
+      note: replacesHistory ? `Snapshot anual; histórico anterior substituído. ${imported.ignored} duplicidades internas ignoradas.` : `Importação online; ${imported.ignored} duplicidades ignoradas.`,
+      snapshot: orders,
+      sourceModifiedAt: parsed.source?.modifiedAt || null,
+    });
     await logAuditEvent(sql, { actor: access.user, action: "orders-import", entityType: "orders", entityId: fileName, request, metadata: { fileName, imported: imported.imported, ignoredDuplicates: imported.ignored, replacedHistory: replacesHistory, totalRecords: previousRecords.length + imported.imported } });
     return NextResponse.json({ ok: true, fileName, imported: imported.imported, ignoredDuplicates: imported.ignored, replacedHistory: replacesHistory, totalRecords: previousRecords.length + imported.imported, persisted: true });
   } catch (error) {

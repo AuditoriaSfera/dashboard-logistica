@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { authorize } from "../../../server/auth.mjs";
-import { databaseConfigured, getSql, loadDashboardFromDatabase, loadSourceWorkbook, logAuditEvent, saveSnapshotToDatabase, saveSourceWorkbook } from "../../../server/db.mjs";
+import { databaseConfigured, getSql, loadDashboardFromDatabase, loadSourceWorkbook, logAuditEvent, recordIndicatorImport, saveSnapshotToDatabase, saveSourceWorkbook } from "../../../server/db.mjs";
 import { loadOneDriveWorkbook, oneDriveConfigured } from "../../../server/onedrive.mjs";
 import { parseWorkbook } from "../../../server/parser.mjs";
 
@@ -123,6 +123,13 @@ export async function POST(request: Request) {
     if (databaseConfigured()) {
       try {
         await saveSnapshotToDatabase(getSql(), { snapshot, orders: snapshot.orders });
+        await recordIndicatorImport(getSql(), {
+          fileName: safeName,
+          sourceModifiedAt: snapshot.source.modifiedAt,
+          importedBy: admin.email,
+          note: uploaded ? "Nova planilha de indicadores importada." : connectedModifiedAt ? "Planilha atualizada a partir da fonte conectada." : "Planilha armazenada reprocessada para atualizar os indicadores.",
+          snapshot,
+        });
         persisted = true;
       } catch (error) {
         console.error("[refresh] Falha ao gravar no banco:", (error as { code?: string })?.code || (error as Error)?.message);

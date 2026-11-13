@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { createIndicatorHistorySnapshot, createOrdersHistorySnapshot } from "./import-history.mjs";
 
 // O driver é carregado em tempo de execução (e não importado estaticamente) de propósito: o empacotador do
 // vinext usa a condição "workerd" e embutiria a variante do Cloudflare (importa cloudflare:sockets), que
@@ -333,9 +334,68 @@ export async function clearOrderRecords(sql) {
   return Number(result?.count ?? 0);
 }
 
-export async function logOrderImport(sql, { fileName, recordCount, importedBy, note }) {
+export async function recordIndicatorImport(sql, { fileName, sourceModifiedAt, importedBy, note, snapshot }) {
   await ensureSchema(sql);
-  await sql`insert into public.order_imports (file_name, record_count, imported_by, note) values (${fileName}, ${recordCount ?? null}, ${importedBy}, ${note})`;
+  const [row] = await sql`
+    insert into public.import_history (source_type, file_name, source_modified_at, imported_by, note, snapshot)
+    values ('indicators', ${fileName}, ${sourceModifiedAt || null}, ${importedBy || null}, ${note || null}, ${sql.json(createIndicatorHistorySnapshot(snapshot))})
+    returning id, imported_at`;
+  return { id: String(row.id), importedAt: row.imported_at?.toISOString?.() ?? String(row.imported_at) };
+}
+
+export async function logOrderImport(sql, { fileName, recordCount, importedBy, note, snapshot, sourceModifiedAt }) {
+  await ensureSchema(sql);
+  const compactSnapshot = snapshot ? createOrdersHistorySnapshot(snapshot) : null;
+  return sql.begin(async (tx) => {
+    const [row] = await tx`
+      insert into public.order_imports (file_name, record_count, imported_by, note)
+      values (${fileName}, ${recordCount ?? null}, ${importedBy || null}, ${note || null})
+      returning id, imported_at`;
+    await tx`
+      insert into public.import_history (source_type, file_name, imported_at, source_modified_at, imported_by, record_count, note, snapshot)
+      values ('orders', ${fileName}, ${row.imported_at}, ${sourceModifiedAt || null}, ${importedBy || null}, ${recordCount ?? null}, ${note || null}, ${compactSnapshot ? tx.json(compactSnapshot) : null})`;
+    return { id: String(row.id), importedAt: row.imported_at?.toISOString?.() ?? String(row.imported_at) };
+  });
+}
+
+export async function ensureImportHistoryBaselines(sql) {
+  await ensureSchema(sql);
+  const existing = new Set((await sql`select source_type from public.import_history where is_baseline`).map((row) => row.source_type));
+  if (existing.size === 2) return;
+  const rows = await sql`
+    select key, data, source_file, source_modified_at, updated_at
+    from public.dashboard_snapshots where key in (${SNAPSHOT_KEY}, ${ORDERS_KEY})`;
+  const dashboard = rows.find((row) => row.key === SNAPSHOT_KEY);
+  const orders = rows.find((row) => row.key === ORDERS_KEY);
+  if (!existing.has("indicators") && dashboard?.data) {
+    const importedAt = dashboard.data.source?.uploadedAt || dashboard.updated_at?.toISOString?.() || new Date().toISOString();
+    await sql`
+      insert into public.import_history (source_type, file_name, imported_at, source_modified_at, note, snapshot, is_baseline)
+      values ('indicators', ${dashboard.source_file || dashboard.data.source?.fileName || "Novas Premiações.xlsx"}, ${importedAt}, ${dashboard.source_modified_at || null}, 'Marco inicial: estado de indicadores disponível quando o histórico foi ativado.', ${sql.json(createIndicatorHistorySnapshot(dashboard.data))}, true)
+      on conflict do nothing`;
+  }
+  if (!existing.has("orders") && orders?.data) {
+    const importedAt = orders.data.source?.lastImportAt || orders.updated_at?.toISOString?.() || new Date().toISOString();
+    await sql`
+      insert into public.import_history (source_type, file_name, imported_at, source_modified_at, note, snapshot, is_baseline)
+      values ('orders', ${orders.source_file || orders.data.source?.fileName || "ConsultaPedidos.xlsx"}, ${importedAt}, ${orders.source_modified_at || null}, 'Marco inicial: estado de pedidos disponível quando o histórico foi ativado; diferenças anteriores não são reconstruídas.', ${sql.json(createOrdersHistorySnapshot(orders.data))}, true)
+      on conflict do nothing`;
+  }
+}
+
+export async function loadImportHistory(sql, limit = 1000) {
+  await ensureImportHistoryBaselines(sql);
+  const safeLimit = Math.min(5000, Math.max(1, Number(limit) || 1000));
+  const rows = await sql`
+    select id, source_type, file_name, imported_at, source_modified_at, imported_by, record_count, note, snapshot, is_baseline
+    from public.import_history order by imported_at desc, id desc limit ${safeLimit}`;
+  return rows.map((row) => ({
+    id: String(row.id), sourceType: row.source_type, fileName: row.file_name,
+    importedAt: row.imported_at?.toISOString?.() ?? String(row.imported_at),
+    sourceModifiedAt: row.source_modified_at?.toISOString?.() ?? null,
+    importedBy: row.imported_by ?? null, recordCount: row.record_count == null ? null : Number(row.record_count),
+    note: row.note ?? null, snapshot: row.snapshot ?? null, isBaseline: Boolean(row.is_baseline),
+  }));
 }
 
 /** @param {{ actor?: object, action: string, entityType?: string | null, entityId?: string | null, metadata?: object, request?: Request | null }} input */

@@ -24,8 +24,10 @@ spec("normaliza a dimensão de lojas sem duplicar variações de grafia", () => 
 });
 
 spec("seleciona o ciclo numérico mais recente, não a ordem lexicográfica", () => {
-  assert.equal(data.indicators.medallia.latestKey, 14);
-  assert.equal(data.indicators["pec-omni"].latestKey, 14);
+  for (const id of ["medallia", "pec-omni"]) {
+    const latestNumericCycle = Math.max(...data.indicators[id].records.map((row) => Number(row.cycle)).filter(Number.isFinite));
+    assert.equal(Number(data.indicators[id].latestKey), latestNumericCycle);
+  }
   assert.ok(data.indicators.medallia.current.value >= 0 && data.indicators.medallia.current.value <= 1);
 });
 
@@ -52,7 +54,9 @@ spec("combina volumes do chat até a linha 742 e da coluna F a partir da linha 7
   assert.equal(firstSpreadsheetRow.raw.receivingVolumes, 12);
   assert.equal(records.find((row) => row.raw.receivingSheetRow === 744).raw.receivingVolumes, 33);
   assert.ok(spreadsheetRows.every((row) => row.raw.receivingVolumeSource === "planilha"));
-  assert.ok(spreadsheetRows.every((row) => row.raw.receivingVolumes != null));
+  // A coluna F pode ficar vazia em notas sem informação de volume; quando há
+  // preenchimento, o parser deve preservar um número não negativo.
+  assert.ok(spreadsheetRows.every((row) => row.raw.receivingVolumes == null || row.raw.receivingVolumes >= 0));
   assert.ok(chatRows.every((row) => row.raw.receivingVolumeSource === "chat"));
   assert.ok(spreadsheetRows.reduce((sum, row) => sum + row.raw.receivingVolumes, 0) > 0);
   // O arquivo de chat é opcional no ambiente local; validamos a origem e a
