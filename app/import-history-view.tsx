@@ -44,6 +44,7 @@ function displayValue(value: number | null, unit: "count" | "percent") {
   return unit === "percent" ? `${(value * 100).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%` : integer.format(value);
 }
 function change(value: number | null, reference: number | null, unit: "count" | "percent", indicatorId: string) {
+  if (value == null && reference == null) return { text: "Sem informação", className: "history-neutral" };
   if (value == null || reference == null) return { text: "Sem comparação", className: "history-neutral" };
   const delta = value - reference;
   if (Math.abs(delta) < 1e-9) return { text: "Sem alteração", className: "history-neutral" };
@@ -119,7 +120,7 @@ export function ImportHistoryView({ imports, loading, error, warning, onReload }
     <section className="summary-grid four history-summary"><article><span>Importações de indicadores</span><strong>{integer.format(visible.length)}</strong><small>No período filtrado</small></article><article><span>Importação comparada</span><strong className="history-summary-date">{selectedCurrent ? dateTime.format(new Date(selectedCurrent.importedAt)) : "—"}</strong><small>{selectedCurrent?.fileName || "Sem importação com resultados"}</small></article><article><span>Importação de referência</span><strong className="history-summary-date">{selectedReference ? dateTime.format(new Date(selectedReference.importedAt)) : "—"}</strong><small>{selectedReference?.fileName || "Selecione duas importações"}</small></article><article><span>Resultados alterados</span><strong>{integer.format(totalChanges)}</strong><small>{storeFilter === "all" ? "Indicador por loja" : stores.find(([key]) => key === storeFilter)?.[1].store || "Loja selecionada"}</small></article></section>
 
     <section className="panel history-comparison-panel">
-      <div className="section-title"><div><h2>Comparação entre importações</h2><p>Os resultados atuais são comparados com a referência escolhida. Percentuais aparecem em pontos percentuais; contagens, em pedidos ou chamados.</p></div></div>
+      <div className="section-title"><div><h2>Comparação com destaque por loja</h2><p>Os resultados das duas importações são comparados por loja. Percentuais aparecem em pontos percentuais; contagens, em pedidos ou chamados.</p></div></div>
       <div className="history-import-selectors"><label>Importação comparada<select value={selectedCurrent?.id || ""} onChange={(event) => setCurrentId(event.target.value)}>{!comparable.length && <option value="">Sem importações disponíveis</option>}{comparable.map((item) => <option key={item.id} value={item.id}>{comparisonLabel(item)}</option>)}</select></label><span aria-hidden="true">versus</span><label>Comparar com<select value={selectedReference?.id || ""} onChange={(event) => setReferenceId(event.target.value)}>{!selectedReference && <option value="">Sem referência disponível</option>}{comparable.filter((item) => item.id !== selectedCurrent?.id).map((item) => <option key={item.id} value={item.id}>{comparisonLabel(item)}</option>)}</select></label></div>
       {!selectedCurrent || !selectedReference ? <div className="history-empty"><Database /><span>São necessárias duas importações com resultados guardados para comparar. As importações antigas sem retrato continuam listadas abaixo.</span></div> : !comparisonStores.length ? <div className="history-empty"><Store /><span>Não há lojas disponíveis nesses retratos.</span></div> : <div className="history-store-comparisons">{comparisonStores.map(([key, store]) => {
         const changed = indicatorIds.filter((id) => {
@@ -132,6 +133,26 @@ export function ImportHistoryView({ imports, loading, error, warning, onReload }
             const value = valueAt(selectedCurrent, id, key); const reference = valueAt(selectedReference, id, key);
             const unit = metricUnit(selectedCurrent, id); const delta = change(value, reference, unit, id);
             return <tr key={id}><td><strong>{selectedCurrent.snapshot?.indicators?.[id]?.label || INDICATOR_LABELS[id] || id}</strong></td><td>{displayValue(reference, unit)}</td><td>{displayValue(value, unit)}</td><td><span className={delta.className}>{delta.text}</span></td></tr>;
+          })}</tbody></table></div>
+        </details>;
+      })}</div>}
+    </section>
+
+    <section className="panel history-indicator-comparison-panel">
+      <div className="section-title"><div><h2>Comparação com destaque por indicador</h2><p>Clique em um indicador para ver a variação dele em todas as lojas, usando as mesmas duas importações acima.</p></div></div>
+      {!selectedCurrent || !selectedReference ? <div className="history-empty"><Database /><span>Selecione duas importações com resultados para comparar os indicadores.</span></div> : !indicatorIds.length ? <div className="history-empty"><Database /><span>Não há resultados de indicadores nesses arquivos.</span></div> : <div className="history-indicator-comparison-grid">{indicatorIds.map((id) => {
+        const label = selectedCurrent.snapshot?.indicators?.[id]?.label || INDICATOR_LABELS[id] || id;
+        const unit = metricUnit(selectedCurrent, id);
+        const changedStores = stores.filter(([key]) => {
+          const value = valueAt(selectedCurrent, id, key); const reference = valueAt(selectedReference, id, key);
+          return value != null && reference != null && Math.abs(value - reference) > 1e-9;
+        }).length;
+        return <details className="panel history-indicator-comparison" key={id}>
+          <summary><span><strong>{label}</strong><small>{changedStores ? `${changedStores} loja(s) com mudança` : "Sem alteração nas lojas"}</small></span><span className="history-summary-change">{changedStores ? `${changedStores} mudanças` : "0 mudanças"}</span></summary>
+          <div className="table-wrap"><table className="history-table"><thead><tr><th>Loja</th><th>Referência</th><th>Resultado comparado</th><th>Variação</th></tr></thead><tbody>{stores.map(([key, store]) => {
+            const value = valueAt(selectedCurrent, id, key); const reference = valueAt(selectedReference, id, key);
+            const delta = change(value, reference, unit, id);
+            return <tr key={key}><td><strong>{store.store}</strong><small>Código {store.storeCode || "—"}</small></td><td>{displayValue(reference, unit)}</td><td>{displayValue(value, unit)}</td><td><span className={delta.className}>{delta.text}</span></td></tr>;
           })}</tbody></table></div>
         </details>;
       })}</div>}

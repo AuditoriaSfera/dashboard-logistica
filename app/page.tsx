@@ -613,32 +613,39 @@ function IndicatorDetailTable({ indicator, onStore, currentUser, cycle }: { indi
 }
 
 function indicatorScopeInfo(indicator: Indicator, cycle: string, startDate: string, endDate: string) {
-  const latestSourceCycle = indicator.records.map((row) => row.cycle).filter((value): value is number => value != null).sort((a, b) => a - b).at(-1);
-  const inferredCycle = cycle || (latestSourceCycle != null ? String(latestSourceCycle) : typeof indicator.latestKey === "string" && /^Ciclo \d+$/.test(indicator.latestKey) ? indicator.latestKey.replace("Ciclo ", "") : "");
-  const cyclePeriod = inferredCycle ? CYCLE_PERIODS[inferredCycle] : null;
-  // Para indicadores por período, `date` normalmente representa a data final.
-  // O rótulo precisa usar explicitamente o início e o fim da competência;
-  // caso contrário, a Medallia começa visualmente em 18/01, que é o fim do
-  // ciclo 1, embora o período tenha começado em 26/12.
-  const starts = indicator.records.map((row) => (row.periodStart || row.date || row.periodEnd || "").slice(0, 10)).filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value)).sort();
-  const ends = indicator.records.map((row) => (row.periodEnd || row.date || row.periodStart || "").slice(0, 10)).filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value)).sort();
-  const sourceStart = starts[0] || "";
-  const sourceEnd = ends.at(-1) || "";
-  const effectiveStart = cyclePeriod?.start || [sourceStart, startDate].filter(Boolean).sort().at(-1) || sourceStart;
-  const coveredEnd = [sourceEnd, endDate].filter(Boolean).sort().at(0) || sourceEnd;
-  const expectedEnd = cyclePeriod?.end || "";
-  const range = effectiveStart && coveredEnd ? `${formatDay(effectiveStart)} a ${formatDay(coveredEnd)}` : effectiveStart ? `${formatDay(effectiveStart)} a sem dados` : "período disponível";
   const today = new Date();
-  const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-  const cycleInProgress = Boolean(expectedEnd && todayIso < expectedEnd);
-  const sourceCoverageIncomplete = Boolean(expectedEnd && (!coveredEnd || coveredEnd < expectedEnd));
+  const iso = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  const todayIso = iso(today);
+  const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+  const yesterdayIso = iso(yesterday);
+  const cyclePeriod = cycle ? CYCLE_PERIODS[cycle] : null;
+  const activePeriod = cyclePeriod || (!startDate && !endDate
+    ? Object.values(CYCLE_PERIODS).find((period) => period.start <= todayIso && period.end >= todayIso)
+    : null);
+  const cycleInProgress = Boolean(activePeriod && activePeriod.end > yesterdayIso && activePeriod.start <= todayIso);
+  const firstCycleStart = Object.values(CYCLE_PERIODS).map((period) => period.start).sort()[0] || "";
+  const sourceDates = indicator.records.map((row) => dateOnly(row.date || row.periodEnd || row.periodStart)).filter((value): value is string => Boolean(value));
+  const sourceStart = sourceDates.sort()[0] || "";
+  const effectiveStart = [cyclePeriod?.start || (!startDate && !endDate ? firstCycleStart : sourceStart), startDate]
+    .filter(Boolean).sort().at(-1) || "";
+  const defaultEnd = cyclePeriod
+    ? (cyclePeriod.end < todayIso || cyclePeriod.start > yesterdayIso ? cyclePeriod.end : yesterdayIso)
+    : (!startDate && !endDate ? yesterdayIso : sourceDates.sort().at(-1) || yesterdayIso);
+  const effectiveEnd = [defaultEnd, endDate].filter(Boolean).sort()[0] || defaultEnd;
+  const relevantDates = indicator.records.filter((row) => {
+    const rowDate = dateOnly(row.date || row.periodEnd || row.periodStart);
+    const belongsToCycle = !cycle || (row.cycle != null ? String(row.cycle) === cycle : Boolean(cyclePeriod && rowDate && rowDate >= cyclePeriod.start && rowDate <= cyclePeriod.end));
+    return belongsToCycle && Boolean(rowDate) && rowDate! <= effectiveEnd && (!startDate || rowDate! >= startDate);
+  }).map((row) => dateOnly(row.date || row.periodEnd || row.periodStart)).filter((value): value is string => Boolean(value));
+  const latestSourceDate = relevantDates.sort().at(-1) || "";
+  const expectedEnd = activePeriod?.end || "";
+  const range = effectiveStart && effectiveEnd ? `${formatDay(effectiveStart)} a ${formatDay(effectiveEnd)}` : effectiveStart ? `${formatDay(effectiveStart)} a sem dados` : "período disponível";
   return {
-    label: `${cycle ? `Ciclo ${inferredCycle}` : "Todos os ciclos"} · ${range}`,
-    partial: cycleInProgress || sourceCoverageIncomplete,
-    partialMessage: cycleInProgress
-      ? "Resultado parcial — ciclo em andamento."
-      : "Resultado parcial — a planilha ainda não cobre todo o ciclo.",
-    coveredEnd,
+    label: `${cycle ? `Ciclo ${cycle}` : "Todos os ciclos"} · ${range}`,
+    partial: cycleInProgress && !endDate,
+    partialMessage: cycle ? "Resultado parcial — o ciclo ainda está em andamento." : "Período acumulado até ontem — o ciclo atual ainda está em andamento.",
+    endDate: effectiveEnd,
+    latestSourceDate,
     expectedEnd,
   };
 }
@@ -647,7 +654,7 @@ function RankingSummary({ indicator, cycle = "", startDate = "", endDate = "" }:
   const scope = indicatorScopeInfo(indicator, cycle, startDate, endDate);
   const periodNote = <>
     <p className="ranking-period">Período do resultado: <strong>{scope.label}</strong></p>
-    {scope.partial && <p className="ranking-period ranking-period-partial" role="status"><strong>{scope.partialMessage}</strong> Dados considerados até {formatDay(scope.coveredEnd) || "o momento"}; data final oficial do ciclo: {formatDay(scope.expectedEnd)}.</p>}
+    {scope.partial && <p className="ranking-period ranking-period-partial" role="status"><strong>{scope.partialMessage}</strong> O período exibido vai até {formatDay(scope.endDate)}. O dado mais recente recebido é de {formatDay(scope.latestSourceDate) || "data não informada"}; essa data não define o fim do período. {scope.expectedEnd && <>Encerramento oficial do ciclo atual: {formatDay(scope.expectedEnd)}.</>}</p>}
   </>;
   if (indicator.id === "recebimento") {
     const receivedNfs = indicator.records.length;
