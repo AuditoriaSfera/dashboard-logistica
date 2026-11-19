@@ -392,6 +392,13 @@ function StorePlacement({ indicator, store }: { indicator: Indicator; store: str
   return placement ? <small className={`store-placement ${placement.kind}`}>{placement.label}</small> : null;
 }
 
+function medalliaComplaintCount(value: string | null | undefined) {
+  if (!value?.trim()) return 0;
+  return value.split(/\s*(?:-{3,}|\r?\n|;\s*(?=["“]))\s*/)
+    .map((complaint) => complaint.replace(/^[\s"“'–—-]+|[\s"”'–—-]+$/g, "").trim())
+    .filter(Boolean).length;
+}
+
 function KpiCard({ indicator, onOpen, storeSelected = false, storeName, hideMetaStatus = false }: { indicator: Indicator; onOpen: () => void; storeSelected?: boolean; storeName?: string; hideMetaStatus?: boolean }) {
   const statusOnly = isWithdrawal(indicator.id);
   return (
@@ -689,7 +696,7 @@ function indicatorScopeInfo(indicator: Indicator, cycle: string, startDate: stri
   };
 }
 
-function RankingSummary({ indicator, cycle = "", startDate = "", endDate = "" }: { indicator: Indicator; cycle?: string; startDate?: string; endDate?: string }) {
+function RankingSummary({ indicator, cycle = "", startDate = "", endDate = "", multiCycle = false }: { indicator: Indicator; cycle?: string; startDate?: string; endDate?: string; multiCycle?: boolean }) {
   const scope = indicatorScopeInfo(indicator, cycle, startDate, endDate);
   const periodNote = <>
     <p className="ranking-period">Período do resultado: <strong>{scope.label}</strong></p>
@@ -701,15 +708,19 @@ function RankingSummary({ indicator, cycle = "", startDate = "", endDate = "" }:
     return <>{periodNote}<p className="ranking-summary">Resultado geral: <strong>{integer.format(receivedNfs)} NFs recebidas · {integer.format(lateNfs)} em atraso</strong></p></>;
   }
   const overall = isWithdrawal(indicator.id) ? "Apuração por loja" : formatResult(indicator.current, indicator.id);
-  return <>{periodNote}<p className="ranking-summary">Resultado geral: <strong>{overall}</strong></p></>;
+  const complaints = multiCycle && indicator.id === "medallia"
+    ? indicator.records.reduce((sum, row) => sum + medalliaComplaintCount(row.complaints), 0)
+    : null;
+  return <>{periodNote}<p className="ranking-summary">Resultado geral: <strong>{overall}</strong>{complaints != null && <> · Reclamações no período: <strong>{integer.format(complaints)}</strong></>}</p></>;
 }
 
 function MedalliaTable({ indicator, hideMetaStatus = false }: { indicator: Indicator; hideMetaStatus?: boolean }) {
-  return <div className="medallia-table-wrap"><table className="medallia-table"><thead><tr><th>Loja</th><th>Respostas</th><th>Resultado</th>{!hideMetaStatus && <th>Situação</th>}<th>Reclamações</th></tr></thead><tbody>{indicator.ranking.map((row) => {
+  return <div className="medallia-table-wrap"><table className="medallia-table"><thead><tr><th>Loja</th><th>Respostas</th><th>Resultado</th>{!hideMetaStatus && <th>Situação</th>}<th>{hideMetaStatus ? "Reclamações no período" : "Reclamações"}</th></tr></thead><tbody>{indicator.ranking.map((row) => {
     const records = indicator.records.filter((item) => item.store === row.store);
     const responses = records.reduce((sum, item) => sum + Number(item.volume || 0), 0);
     const complaints = records.filter((item) => item.complaints).map((item) => item.complaints).join(" • ");
-    return <tr key={row.store}><th><span>{row.store}</span><small>{row.storeCode || "Código não informado"}</small></th><td>{integer.format(responses)}</td><td><strong>{formatValue(row.value, "medallia")}</strong><StorePlacement indicator={indicator} store={row.store} /></td>{!hideMetaStatus && <td><Badge status={row.status} /></td>}<td className="medallia-table-complaint">{complaints || "—"}</td></tr>;
+    const complaintCount = records.reduce((sum, item) => sum + medalliaComplaintCount(item.complaints), 0);
+    return <tr key={row.store}><th><span>{row.store}</span><small>{row.storeCode || "Código não informado"}</small></th><td>{integer.format(responses)}</td><td><strong>{formatValue(row.value, "medallia")}</strong><StorePlacement indicator={indicator} store={row.store} /></td>{!hideMetaStatus && <td><Badge status={row.status} /></td>}<td className={hideMetaStatus ? "medallia-complaint-count" : "medallia-table-complaint"}>{hideMetaStatus ? integer.format(complaintCount) : complaints || "—"}</td></tr>;
   })}</tbody></table></div>;
 }
 
@@ -1254,9 +1265,9 @@ export default function Home() {
              {isWithdrawal(chosen.id)
                   ? <><section className="panel"><h2>{chosen.label}</h2><RankingSummary indicator={chosen} cycle={cycle} startDate={startDate} endDate={endDate} /><IndicatorDetailTable indicator={chosen} onStore={openStore} currentUser={currentUser} cycle={cycle} hideMetaStatus={hideMetaStatus} /></section><StoreComparisonChart indicator={chosen} hideMetaStatus={hideMetaStatus} /><section className="panel"><h2>{trendTitle(chosen)}</h2><Trend indicator={chosen} selectedCycle={cycle} hideMetaStatus={hideMetaStatus} /></section></>
                 : chosen.id === "medallia"
-                  ? <><section className="panel medallia-list-panel"><h2>{chosen.label}</h2><RankingSummary indicator={chosen} cycle={cycle} startDate={startDate} endDate={endDate} /><MedalliaTable indicator={chosen} hideMetaStatus={hideMetaStatus} /></section><StoreComparisonChart indicator={chosen} hideMetaStatus={hideMetaStatus} /><section className="panel"><h2>{trendTitle(chosen)}</h2><Trend indicator={chosen} selectedCycle={cycle} hideMetaStatus={hideMetaStatus} /></section></>
+                  ? <><section className="panel medallia-list-panel"><h2>{chosen.label}</h2><RankingSummary indicator={chosen} cycle={cycle} startDate={startDate} endDate={endDate} multiCycle={hideMetaStatus} /><MedalliaTable indicator={chosen} hideMetaStatus={hideMetaStatus} /></section><StoreComparisonChart indicator={chosen} hideMetaStatus={hideMetaStatus} /><section className="panel"><h2>{trendTitle(chosen)}</h2><Trend indicator={chosen} selectedCycle={cycle} hideMetaStatus={hideMetaStatus} /></section></>
                   : <><section className="panel"><h2>{chosen.label}</h2><RankingSummary indicator={chosen} cycle={cycle} startDate={startDate} endDate={endDate} />{DETAILED_INDICATORS.has(chosen.id) ? <IndicatorDetailTable indicator={chosen} onStore={openStore} currentUser={currentUser} cycle={cycle} hideMetaStatus={hideMetaStatus} /> : <Ranking indicator={chosen} onStore={openStore} showMedalliaDetails={Boolean(cycle)} hideMetaStatus={hideMetaStatus} showPlacement />}</section><StoreComparisonChart indicator={chosen} hideMetaStatus={hideMetaStatus} /><section className="panel"><h2>{trendTitle(chosen)}</h2><Trend indicator={chosen} selectedCycle={cycle} hideMetaStatus={hideMetaStatus} /></section></>}
-             {chosen.id === "medallia" && !cycle && <section className="panel"><h2>Principais reclamações</h2><div className="complaints">{chosen.records.filter((item) => item.complaints).slice(-12).map((item, index) => <button key={index} onClick={() => openStore(item.store)}><strong>{item.store} <small>{item.storeCode}</small></strong><span>{item.complaints}</span></button>)}</div></section>}
+             {chosen.id === "medallia" && !hideMetaStatus && !cycle && <section className="panel"><h2>Principais reclamações</h2><div className="complaints">{chosen.records.filter((item) => item.complaints).slice(-12).map((item, index) => <button key={index} onClick={() => openStore(item.store)}><strong>{item.store} <small>{item.storeCode}</small></strong><span>{item.complaints}</span></button>)}</div></section>}
             {chosen.id.endsWith("cancelados") && <section className="panel"><h2>Saldo Total por loja</h2><p className="muted">{hideMetaStatus ? "Percentual direto da planilha no período selecionado." : "Percentual direto da planilha — abaixo de 2% é melhor."}</p><div className="chart"><ResponsiveContainer width="100%" height={360}><BarChart data={chosen.ranking.slice().reverse().map((item) => ({ ...item, valuePct: (item.value || 0) * 100 }))} layout="vertical"><CartesianGrid horizontal={false} stroke="#e7e9ed" /><XAxis type="number" unit="%" domain={[0, 100]} /><YAxis dataKey="store" type="category" width={110} tick={{ fontSize: 11 }} /><Tooltip formatter={(value) => [`${Number(value).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%`, "Saldo Total"]} />{!hideMetaStatus && <ReferenceLine x={2} stroke="#f59e0b" strokeDasharray="4 4" label={{ value: "Meta 2%", position: "insideTopRight", fill: "#b45309", fontSize: 11 }} />}<Bar dataKey="valuePct" fill="#3157d5" radius={[0, 5, 5, 0]} /></BarChart></ResponsiveContainer></div></section>}
           </>}
 
