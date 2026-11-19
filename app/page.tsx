@@ -101,9 +101,6 @@ const formatResult = (result: Result | null | undefined, id?: string) => {
   if (id === "recebimento" && result.totalCount != null) return `${integer.format(result.totalCount)} NFs / ${integer.format(result.lateCount ?? 0)} atrasadas`;
   return formatValue(result.value, id);
 };
-const formatGap = (gap: number, id: string) => COUNT_INDICATORS.has(id)
-  ? `${integer.format(Math.abs(gap))} acima do limite`
-  : `desvio ${(Math.abs(gap) * 100).toLocaleString("pt-BR", { maximumFractionDigits: 2 })} p.p.`;
 const formatDay = (value: string | null | undefined) => {
   if (!value) return null;
   const day = value.slice(0, 10);
@@ -374,7 +371,7 @@ function Badge({ status, informational = false }: { status: StatusKey; informati
   return <span className={`badge ${item.className}`}><span aria-hidden>{item.icon}</span>{item.label}</span>;
 }
 
-function storePlacement(indicator: Indicator, store: string) {
+function storePlacementPosition(indicator: Indicator, store: string) {
   const rows = (indicator.placementRanking || indicator.ranking).filter((row) => row.value != null)
     .slice().sort((a, b) => {
       const delta = Number(a.value) - Number(b.value);
@@ -382,9 +379,15 @@ function storePlacement(indicator: Indicator, store: string) {
     });
   const index = rows.findIndex((row) => row.store === store);
   if (index < 0) return null;
-  return index < 7
-    ? { label: `${index + 1}ª melhor loja no indicador ${indicator.label}`, kind: "best" as const }
-    : { label: `${rows.length - index}ª pior loja no indicador ${indicator.label}`, kind: "worst" as const };
+  return { rank: index + 1, total: rows.length, bottomRank: rows.length - index };
+}
+
+function storePlacement(indicator: Indicator, store: string) {
+  const position = storePlacementPosition(indicator, store);
+  if (!position) return null;
+  return position.rank <= 7
+    ? { label: `${position.rank}ª melhor loja no indicador ${indicator.label}`, kind: "best" as const }
+    : { label: `${position.bottomRank}ª pior loja no indicador ${indicator.label}`, kind: "worst" as const };
 }
 
 function StorePlacement({ indicator, store }: { indicator: Indicator; store: string }) {
@@ -397,6 +400,60 @@ function medalliaComplaintCount(value: string | null | undefined) {
   return value.split(/\s*(?:-{3,}|\r?\n|;\s*(?=["“]))\s*/)
     .map((complaint) => complaint.replace(/^[\s"“'–—-]+|[\s"”'–—-]+$/g, "").trim())
     .filter(Boolean).length;
+}
+
+type StoreAttentionIssue = {
+  indicator: Indicator;
+  rank: number;
+  total: number;
+  bottomRank: number;
+  cycles: Array<{ cycle: string; result: Result }>;
+};
+type StoreAttentionEntry = { store: string; storeCode: string | null; issues: StoreAttentionIssue[] };
+
+function cycleForRecord(row: RecordItem) {
+  if (row.cycle != null) return String(row.cycle);
+  const date = dateOnly(row.date || row.periodEnd || row.periodStart);
+  if (!date) return "";
+  return Object.entries(CYCLE_PERIODS).find(([, period]) => date >= period.start && date <= period.end)?.[0] || "";
+}
+
+function metaDifference(indicator: Indicator, result: Result) {
+  if (result.value == null || result.target == null || result.status === "unknown") return "Meta não disponível para este ciclo.";
+  const difference = indicator.direction === "lower" ? result.target - result.value : result.value - result.target;
+  const count = Math.abs(Math.round(difference));
+  const amount = COUNT_INDICATORS.has(indicator.id)
+    ? `${integer.format(count)} ${indicator.id === "retirada" ? count === 1 ? "pedido" : "pedidos" : count === 1 ? "chamado" : "chamados"}`
+    : `${(Math.abs(difference) * 100).toLocaleString("pt-BR", { maximumFractionDigits: 2 })} p.p.`;
+  return difference < 0 ? `faltaram ${amount} para atingir a meta` : `meta atingida com folga de ${amount}`;
+}
+
+function attentionMessage(entry: StoreAttentionEntry, period: string) {
+  const points = entry.issues.map((issue) => {
+    const missed = issue.cycles.filter(({ result }) => result.status === "bad");
+    const details = missed.slice(0, 4).map(({ cycle: cycleName, result }) => `Ciclo ${cycleName}: ${formatValue(result.value, issue.indicator.id)}, faltaram ${metaDifference(issue.indicator, result).replace(/^faltaram /, "")}.`);
+    if (missed.length > 4) details.push(`Mais ${missed.length - 4} ciclo(s) com resultado abaixo da meta.`);
+    const summary = details.length ? details.join(" ") : issue.cycles.length
+      ? "acompanhar a posição relativa no comparativo; as metas por ciclo foram atingidas no período."
+      : "acompanhar a posição relativa no comparativo; não há resultados por ciclo disponíveis neste recorte.";
+    return `• ${issue.indicator.label}: ${summary}`;
+  });
+  return `Olá, supervisor(a) da loja ${entry.store}, tudo bem?\n\nNa análise do período ${period}, a unidade apareceu entre as lojas que precisam de acompanhamento, com ${entry.issues.length} indicador(es) entre as últimas posições do comparativo.\n\nPontos para revisão:\n${points.join("\n")}\n\nPor favor, avalie os resultados, identifique as causas e compartilhe as ações previstas. Se precisar de apoio, estamos à disposição.\n\nObrigado(a).`;
+}
+
+function RankingAttentionList({ entries, period }: { entries: StoreAttentionEntry[]; period: string }) {
+  const [copiedStore, setCopiedStore] = useState("");
+  const copyMessage = async (entry: StoreAttentionEntry) => {
+    try {
+      await navigator.clipboard.writeText(attentionMessage(entry, period));
+      setCopiedStore(entry.store);
+      window.setTimeout(() => setCopiedStore((value) => value === entry.store ? "" : value), 2200);
+    } catch { setCopiedStore(""); }
+  };
+  return <article className="panel attention ranking-priority-card"><div className="section-title"><div><h2>Lojas que merecem atenção</h2><p>Ordenadas pela quantidade de indicadores entre as piores posições; empates pelo pior posicionamento individual.</p></div><span className="table-hint">{entries.length} loja(s)</span></div>{entries.length ? <div className="attention-store-list">{entries.map((entry, index) => {
+    const message = attentionMessage(entry, period);
+    return <details className="attention-store" key={entry.store}><summary><span className="attention-rank">{index + 1}</span><span className="attention-store-name"><strong>{entry.store}</strong><small>{entry.storeCode || "Código não informado"}</small></span><span className="attention-count">{entry.issues.length} indicador(es) entre as piores</span><span className="attention-worst">Pior posição: {entry.issues[0]?.bottomRank}ª pior</span></summary><div className="attention-details"><div className="attention-indicators">{entry.issues.map((issue) => <section className="attention-indicator" key={issue.indicator.id}><h3>{issue.indicator.label}<small>{issue.bottomRank}ª pior loja neste indicador · posição {issue.rank} de {issue.total}</small></h3>{issue.cycles.length ? <ul>{issue.cycles.map(({ cycle: cycleName, result }) => <li key={cycleName}><strong>Ciclo {cycleName}:</strong> {formatValue(result.value, issue.indicator.id)} · {metaDifference(issue.indicator, result)}{result.target != null && <> (meta: {formatTarget(issue.indicator.id, result.target)})</>}</li>)}</ul> : <p className="muted">Sem registros por ciclo neste recorte.</p>}</section>)}</div><div className="attention-message"><label htmlFor={`whatsapp-message-${index}`}>Mensagem profissional para o supervisor</label><textarea id={`whatsapp-message-${index}`} readOnly value={message} rows={Math.min(10, 4 + entry.issues.length)} /><div className="attention-message-actions"><button type="button" onClick={() => void copyMessage(entry)}>{copiedStore === entry.store ? "Mensagem copiada" : "Copiar mensagem"}</button><a href={`https://wa.me/?text=${encodeURIComponent(message)}`} target="_blank" rel="noreferrer">Abrir WhatsApp</a></div></div></div></details>;
+  })}</div> : <p className="muted">Nenhuma loja está fora das 7 melhores posições neste período.</p>}</article>;
 }
 
 function KpiCard({ indicator, onOpen, storeSelected = false, storeName, hideMetaStatus = false }: { indicator: Indicator; onOpen: () => void; storeSelected?: boolean; storeName?: string; hideMetaStatus?: boolean }) {
@@ -1169,20 +1226,35 @@ export default function Home() {
     if (!workingData) return [];
     return Object.values(workingData.indicators).filter((item) => !indicatorFilter || item.id === indicatorFilter);
   }, [workingData, indicatorFilter]);
-  const priorityAlerts = useMemo(() => {
+  const attentionEntries = useMemo<StoreAttentionEntry[]>(() => {
     if (!workingData) return [];
-    return workingData.alerts
-      .filter((item) => !indicatorFilter || item.indicator === indicatorFilter)
-      .map((item) => {
-        const metric = workingData.indicators[item.indicator];
-        const gap = item.value != null && item.target != null
-          ? metric.direction === "lower" ? item.value - item.target : item.target - item.value
-          : 0;
-        return { ...item, gap };
-      })
-      .sort((a, b) => b.gap - a.gap || a.store.localeCompare(b.store, "pt-BR"))
-      .slice(0, 8);
-  }, [workingData, indicatorFilter]);
+    return workingData.stores.map((storeEntry) => {
+      const issues = filteredIndicators.flatMap((indicator) => {
+        const position = storePlacementPosition(indicator, storeEntry.store);
+        if (!position || position.rank <= 7) return [];
+        const recordsByCycle = new Map<string, RecordItem[]>();
+        indicator.records.filter((row) => row.store === storeEntry.store).forEach((row) => {
+          const cycleName = cycleForRecord(row) || "Sem ciclo";
+          recordsByCycle.set(cycleName, [...(recordsByCycle.get(cycleName) || []), row]);
+        });
+        const cycles = [...recordsByCycle.entries()].map(([cycleName, rows]) => ({
+          cycle: cycleName,
+          result: aggregateRows(rows, indicator),
+        })).sort((a, b) => {
+          const aCycle = Number(a.cycle); const bCycle = Number(b.cycle);
+          return Number.isFinite(aCycle) && Number.isFinite(bCycle) ? aCycle - bCycle : a.cycle.localeCompare(b.cycle, "pt-BR");
+        });
+        return [{ indicator, rank: position.rank, total: position.total, bottomRank: position.bottomRank, cycles }];
+      }).sort((a, b) => b.rank - a.rank || a.indicator.label.localeCompare(b.indicator.label, "pt-BR"));
+      return { store: storeEntry.store, storeCode: storeEntry.storeCode, issues };
+    }).filter((entry) => entry.issues.length > 0)
+      .sort((a, b) => b.issues.length - a.issues.length
+        || (b.issues[0]?.rank || 0) - (a.issues[0]?.rank || 0)
+        || a.store.localeCompare(b.store, "pt-BR"));
+  }, [workingData, filteredIndicators]);
+  const attentionPeriod = cycle ? `Ciclo ${cycle}` : startDate || endDate
+    ? `${formatDay(startDate) || "início do período"} a ${formatDay(endDate) || "fim do período"}`
+    : "todos os ciclos disponíveis";
   const presentationData = useMemo(() => workingData ? {
     ...workingData,
     filters: { ...workingData.filters, indicators: workingData.filters.indicators.filter((item) => !indicatorFilter || item.id === indicatorFilter) },
@@ -1281,7 +1353,7 @@ export default function Home() {
 
           {view === "stores" && <><section className="page-head"><div><span className="eyebrow">Lojas</span><h1>Visão 360° por loja</h1><p>Selecione uma unidade para detalhar sua operação.</p></div></section><div className="store-grid">{workingData.stores.map((item) => <button key={item.store} onClick={() => openStore(item.store)}><Store /><strong>{item.store}</strong><small className="store-code">{item.storeCode}</small><span>{hideMetaStatus ? `${Object.values(item.indicators).filter((result) => result.value != null).length} resultados no período` : `${Object.values(item.indicators).filter((result) => result.status === "bad").length} pontos de atenção`}</span><ChevronRight /></button>)}</div></>}
 
-          {view === "ranking" && <><section className="page-head"><div><span className="eyebrow">Benchmark interno</span><h1>Ranking de Lojas</h1><p>{hideMetaStatus ? "Resultados consolidados no período selecionado." : "Melhores e piores resultados por indicador."}</p></div></section>{!hideMetaStatus && <article className="panel attention ranking-priority-card"><div className="section-title"><div><h2>Prioridade de ação</h2><p>Ocorrências fora da meta, ordenadas pelo maior desvio.</p></div></div><div className="alert-list">{priorityAlerts.map((item, index) => <button key={`${item.store}-${item.indicator}-${index}`} onClick={() => openStore(item.store)}><AlertTriangle size={17} /><span><strong>{item.store} <small>{item.storeCode}</small></strong><small>{workingData.indicators[item.indicator]?.label} • {formatResult(item, item.indicator)} • {formatGap(item.gap, item.indicator)}</small></span><ChevronRight size={16} /></button>)}{!priorityAlerts.length && <p className="muted">Nenhuma ocorrência crítica calculável.</p>}</div></article>}<div className="indicator-panels">{filteredIndicators.map((item) => <article className="panel" key={item.id}><h2>{item.label}</h2><Ranking indicator={item} onStore={openStore} hideMetaStatus={hideMetaStatus} /></article>)}</div></>}
+          {view === "ranking" && <><section className="page-head"><div><span className="eyebrow">Benchmark interno</span><h1>Ranking de Lojas</h1><p>{hideMetaStatus ? "Resultados consolidados no período selecionado." : "Melhores e piores resultados por indicador."}</p></div></section><RankingAttentionList entries={attentionEntries} period={attentionPeriod} /><div className="indicator-panels">{filteredIndicators.map((item) => <article className="panel" key={item.id}><h2>{item.label}</h2><Ranking indicator={item} onStore={openStore} hideMetaStatus={hideMetaStatus} /></article>)}</div></>}
 
           {view === "performance" && <OrdersView data={data} selectedStore={store} cycle={cycle} startDate={startDate} endDate={endDate} onImported={() => load(true)} />}
 
