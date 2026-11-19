@@ -41,6 +41,7 @@ type Indicator = {
   configuredTarget?: number | null;
   generalByCycle?: Record<string, number>;
   current: Result; ranking: Array<Result & { store: string; storeCode?: string | null }>;
+  placementRanking?: Array<Result & { store: string; storeCode?: string | null }>;
   trend: Array<Result & { period: string }>; records: RecordItem[];
 };
 type DashboardData = {
@@ -270,7 +271,7 @@ const recomputeIndicator = (
   const cycleEnd = cycleUsesSourceColumn ? "" : cyclePeriod?.end;
   const effectiveStart = [startDate, cycleStart].filter(Boolean).sort().at(-1) || "";
   const effectiveEnd = [endDate, cycleEnd].filter(Boolean).sort().at(0) || "";
-  const records = indicator.records.filter((row) => {
+  const recordsForPeriod = indicator.records.filter((row) => {
     const date = recordDate(row);
     const rowCyclePeriod = row.cycle != null ? CYCLE_PERIODS[String(row.cycle)] : null;
     let matchesCycle = true;
@@ -287,11 +288,11 @@ const recomputeIndicator = (
     const cycleDateEnd = cycle && row.cycle == null ? cycleEnd : "";
     const rowStart = [startDate, cycleDateStart].filter(Boolean).sort().at(-1) || "";
     const rowEnd = [endDate, cycleDateEnd].filter(Boolean).sort().at(0) || "";
-    return matchesStores(store, row.store)
-      && matchesCycle
+    return matchesCycle
       && (!rowStart || Boolean(dateForStart) && dateForStart >= rowStart)
       && (!rowEnd || Boolean(dateForEnd) && dateForEnd <= rowEnd);
   });
+  const records = recordsForPeriod.filter((row) => matchesStores(store, row.store));
   const hasDateFilter = Boolean(effectiveStart || effectiveEnd);
   const cycleRows = records.filter((row) => row.cycle != null);
   const allCycles = !cycle && !startDate && !endDate;
@@ -310,6 +311,9 @@ const recomputeIndicator = (
     const latestRows = allCycles || cycle || hasDateFilter
       ? records
       : records.filter((row) => row.cycle != null ? row.cycle === latestKey : row.date === latestKey);
+  const latestRowsForPlacement = allCycles || cycle || hasDateFilter
+      ? recordsForPeriod
+      : recordsForPeriod.filter((row) => row.cycle != null ? row.cycle === latestKey : row.date === latestKey);
   // A escolha de ciclo define o recorte atual, mas não deve apagar o
   // histórico. A evolução continua usando os ciclos mais recentes; filtros
   // de data explícitos ainda limitam a janela histórica.
@@ -328,7 +332,11 @@ const recomputeIndicator = (
   const byStore = new Map<string, RecordItem[]>();
   latestRows.forEach((row) => { if (row.store) byStore.set(row.store, [...(byStore.get(row.store) || []), row]); });
   const ranking = allStores.map(({ store: name, storeCode }) => ({ store: name, storeCode, ...aggregateRows(byStore.get(name) || [], indicator) }))
+    .filter((row) => matchesStores(store, row.store))
     .sort((a, b) => a.value == null ? 1 : b.value == null ? -1 : b.value - a.value || a.store.localeCompare(b.store, "pt-BR"));
+  const allByStoreForPlacement = new Map<string, RecordItem[]>();
+  latestRowsForPlacement.forEach((row) => { if (row.store) allByStoreForPlacement.set(row.store, [...(allByStoreForPlacement.get(row.store) || []), row]); });
+  const placementRanking = allStores.map(({ store: name, storeCode }) => ({ store: name, storeCode, ...aggregateRows(allByStoreForPlacement.get(name) || [], indicator) }));
   const aggregateRowsForCurrent = indicator.id === "pec-omni" && !store.length
     ? latestRows.filter((row) => row.value != null && Number(row.value) > 0)
     : latestRows;
@@ -351,7 +359,7 @@ const recomputeIndicator = (
       status: store.length === 1 ? ranking.find((row) => row.store === store[0])?.status || "unknown" as StatusKey : "unknown" as StatusKey,
     }
     : generalAggregate;
-  return { ...indicator, latestKey, records, current, trend, ranking };
+  return { ...indicator, latestKey, records, current, trend, ranking, placementRanking };
 };
 const deltaText = (value: number | null, target: number | null, direction: string, id: string) => {
   if (value == null || target == null) return "Meta não definida";
@@ -366,12 +374,31 @@ function Badge({ status, informational = false }: { status: StatusKey; informati
   return <span className={`badge ${item.className}`}><span aria-hidden>{item.icon}</span>{item.label}</span>;
 }
 
-function KpiCard({ indicator, onOpen, storeSelected = false, hideMetaStatus = false }: { indicator: Indicator; onOpen: () => void; storeSelected?: boolean; hideMetaStatus?: boolean }) {
+function storePlacement(indicator: Indicator, store: string) {
+  const rows = (indicator.placementRanking || indicator.ranking).filter((row) => row.value != null)
+    .slice().sort((a, b) => {
+      const delta = Number(a.value) - Number(b.value);
+      return (indicator.direction === "lower" ? delta : -delta) || a.store.localeCompare(b.store, "pt-BR");
+    });
+  const index = rows.findIndex((row) => row.store === store);
+  if (index < 0) return null;
+  return index < 7
+    ? { label: `${index + 1}ª melhor loja no indicador ${indicator.label}`, kind: "best" as const }
+    : { label: `${rows.length - index}ª pior loja no indicador ${indicator.label}`, kind: "worst" as const };
+}
+
+function StorePlacement({ indicator, store }: { indicator: Indicator; store: string }) {
+  const placement = storePlacement(indicator, store);
+  return placement ? <small className={`store-placement ${placement.kind}`}>{placement.label}</small> : null;
+}
+
+function KpiCard({ indicator, onOpen, storeSelected = false, storeName, hideMetaStatus = false }: { indicator: Indicator; onOpen: () => void; storeSelected?: boolean; storeName?: string; hideMetaStatus?: boolean }) {
   const statusOnly = isWithdrawal(indicator.id);
   return (
     <button className="kpi-card" onClick={onOpen}>
       <span className="kpi-label">{indicator.label}</span>
       <strong>{hideMetaStatus ? formatResult(indicator.current, indicator.id) : statusOnly ? storeSelected ? STATUS[indicator.current.status].label : "\u00a0" : formatResult(indicator.current, indicator.id)}</strong>
+      {storeName && <StorePlacement indicator={indicator} store={storeName} />}
       {!hideMetaStatus && <><span className="kpi-meta">{isInformational(indicator.id) ? "Sem meta • apenas visualização" : `Meta: ${formatTarget(indicator.id, indicator.current.target)}`}</span><span className="kpi-delta">{statusOnly ? "Resultado exibido por loja" : isInformational(indicator.id) ? "Indicador informativo" : deltaText(indicator.current.value, indicator.current.target, indicator.direction, indicator.id)}</span>{(!statusOnly || storeSelected) && <Badge status={indicator.current.status} informational={isInformational(indicator.id)} />}</>}
       <ChevronRight className="kpi-arrow" size={17} />
     </button>
@@ -490,14 +517,16 @@ function StoreComparisonChart({ indicator, hideMetaStatus = false }: { indicator
   return <section className="panel store-comparison"><h2>Resultado por loja — {indicator.label}</h2><p className="muted">Comparação do resultado atual por loja.</p><div className="chart chart-scroll"><div className="chart-inner"><ResponsiveContainer width="100%" height={340}><BarChart data={rows} margin={{ top: 16, right: 20, left: 8, bottom: 58 }}><CartesianGrid vertical={false} stroke="#e7e9ed" /><XAxis dataKey="store" tick={{ fontSize: 10 }} angle={-35} textAnchor="end" interval={0} /><YAxis domain={isCount ? [0, "auto"] : [0, maxPercent]} unit={isCount ? "" : "%"} tick={{ fontSize: 11 }} /><Tooltip formatter={(value) => [isCount ? integer.format(Number(value)) : `${Number(value).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%`, "Resultado"]} /><Bar dataKey="chartValue" fill="#3157d5" radius={[5, 5, 0, 0]}><LabelList dataKey="chartValue" position="top" formatter={(value) => isCount ? integer.format(Number(value)) : `${Number(value).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%`} /></Bar>{target != null && <ReferenceLine y={target} stroke="#2e3645" strokeDasharray="6 5" label={{ value: `Meta ${isCount ? integer.format(target) : `${Number(target).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%`}`, position: "insideTopRight", fill: "#2e3645", fontSize: 11 }} />}</BarChart></ResponsiveContainer></div></div></section>;
 }
 
-function Ranking({ indicator, onStore, showMedalliaDetails = false, hideMetaStatus = false }: { indicator: Indicator; onStore: (store: string) => void; showMedalliaDetails?: boolean; hideMetaStatus?: boolean }) {
-  const rows = indicator.ranking;
+function Ranking({ indicator, onStore, showMedalliaDetails = false, hideMetaStatus = false, showPlacement = false }: { indicator: Indicator; onStore: (store: string) => void; showMedalliaDetails?: boolean; hideMetaStatus?: boolean; showPlacement?: boolean }) {
+  const rows = showPlacement
+    ? indicator.ranking.slice().sort((a, b) => a.value == null ? 1 : b.value == null ? -1 : (indicator.direction === "lower" ? Number(a.value) - Number(b.value) : Number(b.value) - Number(a.value)) || a.store.localeCompare(b.store, "pt-BR"))
+    : indicator.ranking;
   return (
     <div className={`ranking ${indicator.id === "recebimento" ? "receiving-ranking" : ""} ${indicator.id === "medallia" && showMedalliaDetails ? "medallia-ranking" : ""}`}>
       {rows.map((row, index) => (
         <button key={row.store} onClick={() => onStore(row.store)}>
           <span className="rank">{index + 1}</span><span className="store-name">{row.store}<small>{row.storeCode || "Código não informado"}</small>{indicator.id === "medallia" && showMedalliaDetails && <><small className="ranking-detail">{integer.format(indicator.records.filter((item) => item.store === row.store).reduce((sum, item) => sum + Number(item.volume || 0), 0))} respostas</small>{indicator.records.filter((item) => item.store === row.store && item.complaints).map((item, complaintIndex) => <small className="ranking-complaint" key={complaintIndex}>{item.complaints}</small>)}</>}</span>
-          <strong><ResultValue result={row} id={indicator.id} /></strong>{!hideMetaStatus && <Badge status={row.status} informational={isInformational(indicator.id)} />}
+          <strong><ResultValue result={row} id={indicator.id} /></strong>{showPlacement && <StorePlacement indicator={indicator} store={row.store} />}{!hideMetaStatus && <Badge status={row.status} informational={isInformational(indicator.id)} />}
         </button>
       ))}
       {!rows.length && <p className="muted">Nenhuma loja disponível neste recorte.</p>}
@@ -619,7 +648,7 @@ function IndicatorDetailTable({ indicator, onStore, currentUser, cycle, hideMeta
         : indicator.id === "trilogo"
           ? ["Loja / código", "Chamados", "Resultado", ...(!hideMetaStatus ? ["Situação"] : [])]
           : ["Loja / código", "Registros", "Resultado", ...(!hideMetaStatus ? ["Situação"] : [])];
-  return <div className="indicator-detail-table-wrap"><table className="indicator-detail-table"><thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{rows.map((row) => { const item = detail(row); const receiving = indicator.id === "recebimento"; const stockBreak = indicator.id === "quebra-estoque"; const arrangement = indicator.id === "arruamento"; return <tr key={row.store}><th><button onClick={() => onStore(row.store)}><span>{row.store}</span><small>{row.storeCode || "Código não informado"}</small></button></th>{arrangement ? <><td><strong>{item.skuTotal}</strong></td><td><strong>{item.arranged}</strong></td><td><strong>{item.withoutArrangement}</strong></td></> : <td><strong>{item.primary}</strong>{item.secondary && <small>{item.secondary}</small>}</td>}{receiving && <td><strong>{item.volumes}</strong><small>{item.weeklyVolumes ? `Média ${item.weeklyVolumes}` : ""}</small></td>}{receiving && <td><strong>{item.late}</strong></td>}{stockBreak && <td><strong>{item.sold}</strong></td>}<td><strong>{indicator.id === "retirada" ? integer.format(row.count) : formatValue(row.value, indicator.id)}</strong>{!hideMetaStatus && <small>{row.target == null ? "Sem meta" : `Meta: ${formatTarget(indicator.id, row.target)}`}</small>}</td>{!hideMetaStatus && <td><Badge status={row.status} informational={isInformational(indicator.id)} /></td>}{arrangement && <td><ArruamentoWorkbookAction store={row.store} storeCode={row.storeCode} cycle={workbookCycle} currentUser={currentUser} /></td>}</tr>; })}</tbody></table>{!rows.length && <p className="muted">Nenhuma loja disponível neste recorte.</p>}</div>;
+  return <div className="indicator-detail-table-wrap"><table className="indicator-detail-table"><thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{rows.map((row) => { const item = detail(row); const receiving = indicator.id === "recebimento"; const stockBreak = indicator.id === "quebra-estoque"; const arrangement = indicator.id === "arruamento"; return <tr key={row.store}><th><button onClick={() => onStore(row.store)}><span>{row.store}</span><small>{row.storeCode || "Código não informado"}</small></button></th>{arrangement ? <><td><strong>{item.skuTotal}</strong></td><td><strong>{item.arranged}</strong></td><td><strong>{item.withoutArrangement}</strong></td></> : <td><strong>{item.primary}</strong>{item.secondary && <small>{item.secondary}</small>}</td>}{receiving && <td><strong>{item.volumes}</strong><small>{item.weeklyVolumes ? `Média ${item.weeklyVolumes}` : ""}</small></td>}{receiving && <td><strong>{item.late}</strong></td>}{stockBreak && <td><strong>{item.sold}</strong></td>}<td><strong>{indicator.id === "retirada" ? integer.format(row.count) : formatValue(row.value, indicator.id)}</strong><StorePlacement indicator={indicator} store={row.store} />{!hideMetaStatus && <small>{row.target == null ? "Sem meta" : `Meta: ${formatTarget(indicator.id, row.target)}`}</small>}</td>{!hideMetaStatus && <td><Badge status={row.status} informational={isInformational(indicator.id)} /></td>}{arrangement && <td><ArruamentoWorkbookAction store={row.store} storeCode={row.storeCode} cycle={workbookCycle} currentUser={currentUser} /></td>}</tr>; })}</tbody></table>{!rows.length && <p className="muted">Nenhuma loja disponível neste recorte.</p>}</div>;
 }
 
 function indicatorScopeInfo(indicator: Indicator, cycle: string, startDate: string, endDate: string) {
@@ -680,7 +709,7 @@ function MedalliaTable({ indicator, hideMetaStatus = false }: { indicator: Indic
     const records = indicator.records.filter((item) => item.store === row.store);
     const responses = records.reduce((sum, item) => sum + Number(item.volume || 0), 0);
     const complaints = records.filter((item) => item.complaints).map((item) => item.complaints).join(" • ");
-    return <tr key={row.store}><th><span>{row.store}</span><small>{row.storeCode || "Código não informado"}</small></th><td>{integer.format(responses)}</td><td><strong>{formatValue(row.value, "medallia")}</strong></td>{!hideMetaStatus && <td><Badge status={row.status} /></td>}<td className="medallia-table-complaint">{complaints || "—"}</td></tr>;
+    return <tr key={row.store}><th><span>{row.store}</span><small>{row.storeCode || "Código não informado"}</small></th><td>{integer.format(responses)}</td><td><strong>{formatValue(row.value, "medallia")}</strong><StorePlacement indicator={indicator} store={row.store} /></td>{!hideMetaStatus && <td><Badge status={row.status} /></td>}<td className="medallia-table-complaint">{complaints || "—"}</td></tr>;
   })}</tbody></table></div>;
 }
 
@@ -695,12 +724,12 @@ function Matrix({ data, onStore, hideMetaStatus = false }: { data: DashboardData
             <th><button onClick={() => onStore(entry.store)}>{entry.store}<small>{entry.storeCode || "Código não informado"}</small></button></th>
             {visible.map((item) => {
               const result = entry.indicators[item.id] || { status: "unknown" as StatusKey, value: null, target: null };
-              if (hideMetaStatus) return <td key={item.id}><strong className="matrix-result">{formatResult(result, item.id)}</strong></td>;
+              if (hideMetaStatus) return <td key={item.id}><strong className="matrix-result">{formatResult(result, item.id)}</strong><StorePlacement indicator={data.indicators[item.id]} store={entry.store} /></td>;
               const meta = STATUS[result.status] || STATUS.unknown;
               const label = isInformational(item.id) ? "Apenas visualização" : meta.label;
               const targetLabel = isInformational(item.id) ? "Sem meta" : `Meta: ${formatTarget(item.id, result.target)}`;
               const title = `${label} • Resultado: ${formatResult(result, item.id)} • ${targetLabel}`;
-              return <td key={item.id}><span className={`matrix-dot ${meta.className}`} title={title}>{meta.icon}<span className="sr-only">{label}</span></span></td>;
+              return <td key={item.id}><span className={`matrix-dot ${meta.className}`} title={title}>{meta.icon}<span className="sr-only">{label}</span></span><StorePlacement indicator={data.indicators[item.id]} store={entry.store} /></td>;
             })}
           </tr>
         ))}</tbody>
@@ -1105,10 +1134,11 @@ export default function Home() {
 
   const workingData = useMemo(() => {
     if (!data) return null;
+    const allStoreEntries = data.stores.map(({ store: name, storeCode }) => ({ store: name, storeCode }));
     const storeEntries = (store.length ? data.stores.filter((item) => store.includes(item.store)) : data.stores)
       .map(({ store: name, storeCode }) => ({ store: name, storeCode }));
     const indicators = Object.fromEntries(Object.values(data.indicators).map((item) => {
-      const recomputed = recomputeIndicator(item, store, cycle, startDate, endDate, storeEntries);
+      const recomputed = recomputeIndicator(item, store, cycle, startDate, endDate, allStoreEntries);
       return [recomputed.id, recomputed];
     }));
     const stores = storeEntries.map(({ store: name, storeCode }) => ({
@@ -1206,14 +1236,14 @@ export default function Home() {
           {authError && <p className="auth-message access-error" role="alert">{authError}</p>}
           {view === "overview" && <>
             <section className="page-head"><div><span className="eyebrow">Visão executiva</span><h1>Visão Geral da Operação</h1><p>{hideMetaStatus ? "Resultados consolidados das lojas no período selecionado." : "O que está saudável, onde agir e quais lojas exigem atenção."}</p></div><span className="data-chip">{filteredIndicators.reduce((sum, item) => sum + item.records.length, 0).toLocaleString("pt-BR")} registros no recorte</span></section>
-            {rotationEntry && <section className={`panel overview-rotation-card${rotationPulse ? " rotation-pulse" : ""}`}><div className="section-title"><div><h2>Resumo rotativo</h2><p>Visão 360° de cada loja, com todos os indicadores.</p></div><span className="rotation-timer">Troca após 10s sem interação</span></div><div className="rotation-store-card"><div className="rotation-heading"><span>Visão 360° da loja</span><strong>{rotationEntry.store.store}</strong><small>{rotationEntry.store.storeCode || "—"}</small></div><div className="rotation-store-metrics">{filteredIndicators.map((metric) => { const result = rotationEntry.store.indicators[metric.id]; return <div key={metric.id}><span>{metric.label}</span><strong><ResultValue result={result} id={metric.id} /></strong>{!hideMetaStatus && <Badge status={result?.status || "unknown"} informational={isInformational(metric.id)} />}</div>; })}</div></div><div className="rotation-dots" aria-label="Navegação do resumo rotativo"><button type="button" onClick={() => { lastOverviewInteraction.current = Date.now(); setOverviewRotation((rotationPosition - 1 + rotationTotal) % rotationTotal); }}>‹</button><span>{rotationPosition + 1} / {rotationTotal}</span><button type="button" onClick={() => { lastOverviewInteraction.current = Date.now(); setOverviewRotation((rotationPosition + 1) % rotationTotal); }}>›</button></div></section>}
+            {rotationEntry && <section className={`panel overview-rotation-card${rotationPulse ? " rotation-pulse" : ""}`}><div className="section-title"><div><h2>Resumo rotativo</h2><p>Visão 360° de cada loja, com todos os indicadores.</p></div><span className="rotation-timer">Troca após 10s sem interação</span></div><div className="rotation-store-card"><div className="rotation-heading"><span>Visão 360° da loja</span><strong>{rotationEntry.store.store}</strong><small>{rotationEntry.store.storeCode || "—"}</small></div><div className="rotation-store-metrics">{filteredIndicators.map((metric) => { const result = rotationEntry.store.indicators[metric.id]; return <div key={metric.id}><span>{metric.label}</span><strong><ResultValue result={result} id={metric.id} /></strong><StorePlacement indicator={workingData.indicators[metric.id]} store={rotationEntry.store.store} />{!hideMetaStatus && <Badge status={result?.status || "unknown"} informational={isInformational(metric.id)} />}</div>; })}</div></div><div className="rotation-dots" aria-label="Navegação do resumo rotativo"><button type="button" onClick={() => { lastOverviewInteraction.current = Date.now(); setOverviewRotation((rotationPosition - 1 + rotationTotal) % rotationTotal); }}>‹</button><span>{rotationPosition + 1} / {rotationTotal}</span><button type="button" onClick={() => { lastOverviewInteraction.current = Date.now(); setOverviewRotation((rotationPosition + 1) % rotationTotal); }}>›</button></div></section>}
             <section className="summary-grid">
               <article><Building2 /><span>Lojas analisadas</span><strong>{workingData.stores.length}</strong></article>
               {hideMetaStatus ? <article><BarChart3 /><span>Ciclos no período</span><strong>{cyclesInAnalysisRange(cycle, startDate, endDate)}</strong></article> : <><article><CircleGauge /><span>Indicadores dentro</span><strong>{good}</strong></article><article><AlertTriangle /><span>Indicadores fora</span><strong>{bad}</strong></article></>}
             </section>
-            <section><div className="section-title"><div><h2>Indicadores principais</h2><p>Resultado do período e dos filtros selecionados.</p></div></div><div className="kpi-grid">{filteredIndicators.filter((item) => hideMetaStatus || !statusFilter || item.current.status === statusFilter).map((item) => <KpiCard key={item.id} indicator={item} storeSelected={store.length > 0} hideMetaStatus={hideMetaStatus} onOpen={() => openIndicator(item.id)} />)}</div></section>
+            <section><div className="section-title"><div><h2>Indicadores principais</h2><p>Resultado do período e dos filtros selecionados.</p></div></div><div className="kpi-grid">{filteredIndicators.filter((item) => hideMetaStatus || !statusFilter || item.current.status === statusFilter).map((item) => <KpiCard key={item.id} indicator={item} storeSelected={store.length > 0} storeName={store.length === 1 ? store[0] : undefined} hideMetaStatus={hideMetaStatus} onOpen={() => openIndicator(item.id)} />)}</div></section>
             <section className="two-col">
-              <article className="panel"><div className="section-title"><div><h2>{evolutionIndicator ? (isWithdrawal(evolutionIndicator.id) ? evolutionIndicator.label : trendTitle(evolutionIndicator)) : "Evolução do indicador"}</h2><p>{evolutionIndicator ? `Valores exibidos em ${trendUnit(evolutionIndicator.id)}.` : "Selecione um indicador"}</p></div></div>{evolutionIndicator && (isWithdrawal(evolutionIndicator.id) ? <Ranking indicator={evolutionIndicator} onStore={openStore} hideMetaStatus={hideMetaStatus} /> : <Trend indicator={evolutionIndicator} selectedCycle={cycle} hideMetaStatus={hideMetaStatus} />)}</article>
+              <article className="panel"><div className="section-title"><div><h2>{evolutionIndicator ? (isWithdrawal(evolutionIndicator.id) ? evolutionIndicator.label : trendTitle(evolutionIndicator)) : "Evolução do indicador"}</h2><p>{evolutionIndicator ? `Valores exibidos em ${trendUnit(evolutionIndicator.id)}.` : "Selecione um indicador"}</p></div></div>{evolutionIndicator && (isWithdrawal(evolutionIndicator.id) ? <Ranking indicator={evolutionIndicator} onStore={openStore} hideMetaStatus={hideMetaStatus} showPlacement /> : <Trend indicator={evolutionIndicator} selectedCycle={cycle} hideMetaStatus={hideMetaStatus} />)}</article>
             </section>
             <section className="panel"><div className="section-title"><div><h2>Mapa de performance</h2><p>Clique em uma loja para abrir a visão 360°.</p></div></div><Matrix data={presentationData || workingData} onStore={openStore} hideMetaStatus={hideMetaStatus} /></section>
           </>}
@@ -1225,7 +1255,7 @@ export default function Home() {
                   ? <><section className="panel"><h2>{chosen.label}</h2><RankingSummary indicator={chosen} cycle={cycle} startDate={startDate} endDate={endDate} /><IndicatorDetailTable indicator={chosen} onStore={openStore} currentUser={currentUser} cycle={cycle} hideMetaStatus={hideMetaStatus} /></section><StoreComparisonChart indicator={chosen} hideMetaStatus={hideMetaStatus} /><section className="panel"><h2>{trendTitle(chosen)}</h2><Trend indicator={chosen} selectedCycle={cycle} hideMetaStatus={hideMetaStatus} /></section></>
                 : chosen.id === "medallia"
                   ? <><section className="panel medallia-list-panel"><h2>{chosen.label}</h2><RankingSummary indicator={chosen} cycle={cycle} startDate={startDate} endDate={endDate} /><MedalliaTable indicator={chosen} hideMetaStatus={hideMetaStatus} /></section><StoreComparisonChart indicator={chosen} hideMetaStatus={hideMetaStatus} /><section className="panel"><h2>{trendTitle(chosen)}</h2><Trend indicator={chosen} selectedCycle={cycle} hideMetaStatus={hideMetaStatus} /></section></>
-                  : <><section className="panel"><h2>{chosen.label}</h2><RankingSummary indicator={chosen} cycle={cycle} startDate={startDate} endDate={endDate} />{DETAILED_INDICATORS.has(chosen.id) ? <IndicatorDetailTable indicator={chosen} onStore={openStore} currentUser={currentUser} cycle={cycle} hideMetaStatus={hideMetaStatus} /> : <Ranking indicator={chosen} onStore={openStore} showMedalliaDetails={Boolean(cycle)} hideMetaStatus={hideMetaStatus} />}</section><StoreComparisonChart indicator={chosen} hideMetaStatus={hideMetaStatus} /><section className="panel"><h2>{trendTitle(chosen)}</h2><Trend indicator={chosen} selectedCycle={cycle} hideMetaStatus={hideMetaStatus} /></section></>}
+                  : <><section className="panel"><h2>{chosen.label}</h2><RankingSummary indicator={chosen} cycle={cycle} startDate={startDate} endDate={endDate} />{DETAILED_INDICATORS.has(chosen.id) ? <IndicatorDetailTable indicator={chosen} onStore={openStore} currentUser={currentUser} cycle={cycle} hideMetaStatus={hideMetaStatus} /> : <Ranking indicator={chosen} onStore={openStore} showMedalliaDetails={Boolean(cycle)} hideMetaStatus={hideMetaStatus} showPlacement />}</section><StoreComparisonChart indicator={chosen} hideMetaStatus={hideMetaStatus} /><section className="panel"><h2>{trendTitle(chosen)}</h2><Trend indicator={chosen} selectedCycle={cycle} hideMetaStatus={hideMetaStatus} /></section></>}
              {chosen.id === "medallia" && !cycle && <section className="panel"><h2>Principais reclamações</h2><div className="complaints">{chosen.records.filter((item) => item.complaints).slice(-12).map((item, index) => <button key={index} onClick={() => openStore(item.store)}><strong>{item.store} <small>{item.storeCode}</small></strong><span>{item.complaints}</span></button>)}</div></section>}
             {chosen.id.endsWith("cancelados") && <section className="panel"><h2>Saldo Total por loja</h2><p className="muted">{hideMetaStatus ? "Percentual direto da planilha no período selecionado." : "Percentual direto da planilha — abaixo de 2% é melhor."}</p><div className="chart"><ResponsiveContainer width="100%" height={360}><BarChart data={chosen.ranking.slice().reverse().map((item) => ({ ...item, valuePct: (item.value || 0) * 100 }))} layout="vertical"><CartesianGrid horizontal={false} stroke="#e7e9ed" /><XAxis type="number" unit="%" domain={[0, 100]} /><YAxis dataKey="store" type="category" width={110} tick={{ fontSize: 11 }} /><Tooltip formatter={(value) => [`${Number(value).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%`, "Saldo Total"]} />{!hideMetaStatus && <ReferenceLine x={2} stroke="#f59e0b" strokeDasharray="4 4" label={{ value: "Meta 2%", position: "insideTopRight", fill: "#b45309", fontSize: 11 }} />}<Bar dataKey="valuePct" fill="#3157d5" radius={[0, 5, 5, 0]} /></BarChart></ResponsiveContainer></div></section>}
           </>}
@@ -1234,7 +1264,7 @@ export default function Home() {
             <section className="page-head"><div><span className="eyebrow">Visão 360° da Loja</span><h1 className="store-title">{storeRow.store} <small>{storeRow.storeCode}</small></h1><p>Todos os indicadores disponíveis no período selecionado.</p></div><button className="back" onClick={() => setView("overview")}>Voltar à visão geral</button></section>
             <div className="kpi-grid">{(presentationData || workingData).filters.indicators.map((item) => {
               const result = storeRow.indicators[item.id]; const source = workingData.indicators[item.id];
-              return <button className="kpi-card" key={item.id} onClick={() => openIndicator(item.id)}><span className="kpi-label">{item.label}</span><strong><ResultValue result={result} id={item.id} /></strong>{!hideMetaStatus && <><span className="kpi-meta">{isInformational(item.id) ? "Sem meta • apenas visualização" : `Meta: ${formatTarget(item.id, result?.target ?? null)}`}</span><Badge status={result?.status || "unknown"} informational={isInformational(item.id)} /></>}<ChevronRight className="kpi-arrow" size={17} />{source?.records.some((r) => r.store === storeRow.store && r.complaints) && <span className="has-note">Possui reclamações registradas</span>}</button>;
+              return <button className="kpi-card" key={item.id} onClick={() => openIndicator(item.id)}><span className="kpi-label">{item.label}</span><strong><ResultValue result={result} id={item.id} /></strong><StorePlacement indicator={workingData.indicators[item.id]} store={storeRow.store} />{!hideMetaStatus && <><span className="kpi-meta">{isInformational(item.id) ? "Sem meta • apenas visualização" : `Meta: ${formatTarget(item.id, result?.target ?? null)}`}</span><Badge status={result?.status || "unknown"} informational={isInformational(item.id)} /></>}<ChevronRight className="kpi-arrow" size={17} />{source?.records.some((r) => r.store === storeRow.store && r.complaints) && <span className="has-note">Possui reclamações registradas</span>}</button>;
             })}</div>
           </>}
 
