@@ -79,6 +79,17 @@ const INFORMATIONAL_INDICATORS = new Set<string>();
 const DETAILED_INDICATORS = new Set(["arruamento", "recebimento", "retirada", "trilogo", "quebra-estoque"]);
 const CYCLE_PERIODS = cyclePeriodsSource as Record<string, { start: string; end: string }>;
 const cycleOptions = Object.keys(CYCLE_PERIODS).sort((a, b) => Number(a) - Number(b));
+function cyclesInAnalysisRange(cycle: string, startDate: string, endDate: string) {
+  if (cycle) return 1;
+  const today = new Date();
+  const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+  const yesterdayIso = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, "0")}-${String(yesterday.getDate()).padStart(2, "0")}`;
+  const firstCycleDate = Object.values(CYCLE_PERIODS).map((period) => period.start).sort()[0] || "";
+  const rangeStart = startDate || firstCycleDate;
+  const rangeEnd = endDate || yesterdayIso;
+  if (!rangeStart || !rangeEnd || rangeStart > rangeEnd) return 1;
+  return Math.max(1, Object.values(CYCLE_PERIODS).filter((period) => period.start <= rangeEnd && period.end >= rangeStart).length);
+}
 const isInformational = (id: string) => INFORMATIONAL_INDICATORS.has(id);
 const isWithdrawal = (id: string) => id === "retirada";
 const trendUnit = (id: string) => COUNT_INDICATORS.has(id) ? "quantidade do total" : "percentual do total (%)";
@@ -355,15 +366,13 @@ function Badge({ status, informational = false }: { status: StatusKey; informati
   return <span className={`badge ${item.className}`}><span aria-hidden>{item.icon}</span>{item.label}</span>;
 }
 
-function KpiCard({ indicator, onOpen, storeSelected = false }: { indicator: Indicator; onOpen: () => void; storeSelected?: boolean }) {
+function KpiCard({ indicator, onOpen, storeSelected = false, hideMetaStatus = false }: { indicator: Indicator; onOpen: () => void; storeSelected?: boolean; hideMetaStatus?: boolean }) {
   const statusOnly = isWithdrawal(indicator.id);
   return (
     <button className="kpi-card" onClick={onOpen}>
       <span className="kpi-label">{indicator.label}</span>
-      <strong>{statusOnly ? storeSelected ? STATUS[indicator.current.status].label : "\u00a0" : formatResult(indicator.current, indicator.id)}</strong>
-      <span className="kpi-meta">{isInformational(indicator.id) ? "Sem meta • apenas visualização" : `Meta: ${formatTarget(indicator.id, indicator.current.target)}`}</span>
-      <span className="kpi-delta">{statusOnly ? "Resultado exibido por loja" : isInformational(indicator.id) ? "Indicador informativo" : deltaText(indicator.current.value, indicator.current.target, indicator.direction, indicator.id)}</span>
-      {(!statusOnly || storeSelected) && <Badge status={indicator.current.status} informational={isInformational(indicator.id)} />}
+      <strong>{hideMetaStatus ? formatResult(indicator.current, indicator.id) : statusOnly ? storeSelected ? STATUS[indicator.current.status].label : "\u00a0" : formatResult(indicator.current, indicator.id)}</strong>
+      {!hideMetaStatus && <><span className="kpi-meta">{isInformational(indicator.id) ? "Sem meta • apenas visualização" : `Meta: ${formatTarget(indicator.id, indicator.current.target)}`}</span><span className="kpi-delta">{statusOnly ? "Resultado exibido por loja" : isInformational(indicator.id) ? "Indicador informativo" : deltaText(indicator.current.value, indicator.current.target, indicator.direction, indicator.id)}</span>{(!statusOnly || storeSelected) && <Badge status={indicator.current.status} informational={isInformational(indicator.id)} />}</>}
       <ChevronRight className="kpi-arrow" size={17} />
     </button>
   );
@@ -397,12 +406,13 @@ function MultiSelectPopover({ options, selected, onChange, placeholder }: { opti
 
 function Filters({
   data, store, setStore, cycle, setCycle, startDate, setStartDate, endDate, setEndDate,
-  indicator, setIndicator, status, setStatus,
+  indicator, setIndicator, status, setStatus, hideMetaStatus = false,
 }: {
   data: DashboardData; store: string[]; setStore: (v: string[]) => void;
   cycle: string; setCycle: (v: string) => void; indicator: string; setIndicator: (v: string) => void;
   startDate: string; setStartDate: (v: string) => void; endDate: string; setEndDate: (v: string) => void;
   status: string; setStatus: (v: string) => void;
+  hideMetaStatus?: boolean;
 }) {
   const sourceDates = Object.values(data.indicators).flatMap((item) => item.records.map((row) => dateOnly(row.date || row.periodEnd || row.periodStart))).filter((value): value is string => Boolean(value));
   const cycleDates = Object.values(CYCLE_PERIODS).flatMap((period) => [period.start, period.end]);
@@ -420,15 +430,15 @@ function Filters({
       <label>Data final<AvailableDatePicker value={endDate} onChange={(value) => setAvailableDate(value, setEndDate)} dates={uniqueDates} placeholder="dd/mm/aaaa" /></label>
       <label>Loja<MultiSelectPopover selected={store} onChange={setStore} placeholder="Todas as lojas" options={data.filters.stores.map((value) => { const code = data.stores.find((item) => item.store === value)?.storeCode; return { value, label: code ? `${code} • ${value}` : value }; })} /></label>
       <label>Indicador<select value={indicator} onChange={(e) => setIndicator(e.target.value)}><option value="">Todos</option>{data.filters.indicators.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
-      <label>Status<select value={status} onChange={(e) => setStatus(e.target.value)}><option value="">Todos</option><option value="good">Dentro da meta</option><option value="warning">Atenção</option><option value="bad">Fora da meta</option><option value="unknown">Sem informação</option></select></label>
+      {!hideMetaStatus && <label>Status<select value={status} onChange={(e) => setStatus(e.target.value)}><option value="">Todos</option><option value="good">Dentro da meta</option><option value="warning">Atenção</option><option value="bad">Fora da meta</option><option value="unknown">Sem informação</option></select></label>}
       <button className="clear" onClick={() => { setStore([]); setCycle(""); setStartDate(""); setEndDate(""); setIndicator(""); setStatus(""); }}>Limpar filtros</button>
     </section>
   );
 }
 
-function Trend({ indicator, selectedCycle = "" }: { indicator: Indicator; selectedCycle?: string }) {
+function Trend({ indicator, selectedCycle = "", hideMetaStatus = false }: { indicator: Indicator; selectedCycle?: string; hideMetaStatus?: boolean }) {
   const isCount = COUNT_INDICATORS.has(indicator.id);
-  const showTarget = !new Set(["retirada", "arruamento", "trilogo", "quebra-estoque"]).has(indicator.id);
+  const showTarget = !hideMetaStatus && !new Set(["retirada", "arruamento", "trilogo", "quebra-estoque"]).has(indicator.id);
   const rows = indicator.trend.map((item) => {
     // Quando a planilha fornece um Resultado Geral por ciclo (ex.: NPS
     // Total), ele é a fonte oficial da evolução; não usamos a média das
@@ -448,11 +458,11 @@ function Trend({ indicator, selectedCycle = "" }: { indicator: Indicator; select
   if (rows.length < 2) return <div className="empty-chart">Histórico insuficiente para uma curva de evolução confiável.</div>;
   return (
     <>
-      <div className="trend-compare" aria-label="Comparação com a meta">
+      <div className="trend-compare" aria-label={hideMetaStatus ? "Resultados por ciclo" : "Comparação com a meta"}>
         <div><span>Último ciclo</span><strong><ResultValue result={latest} id={indicator.id} /></strong></div>
         <div><span>Ciclo anterior</span><strong><ResultValue result={previous} id={indicator.id} /></strong></div>
         {showTarget && <div><span>Meta</span><strong>{formatTarget(indicator.id, latest?.target ?? indicator.configuredTarget ?? null)}</strong></div>}
-        <div><span>{selected ? `Ciclo ${selectedCycle}` : "Ciclos fora da meta"}</span><strong>{selected ? <ResultValue result={selected} id={indicator.id} /> : `${streak} consecutivo${streak === 1 ? "" : "s"}`}</strong></div>
+        {hideMetaStatus ? selected && <div><span>Ciclo {selectedCycle}</span><strong><ResultValue result={selected} id={indicator.id} /></strong></div> : <div><span>{selected ? `Ciclo ${selectedCycle}` : "Ciclos fora da meta"}</span><strong>{selected ? <ResultValue result={selected} id={indicator.id} /> : `${streak} consecutivo${streak === 1 ? "" : "s"}`}</strong></div>}
       </div>
       <div className="chart" role="img" aria-label={`Evolução de ${indicator.label}`}>
         <ResponsiveContainer width="100%" height={280}>
@@ -461,7 +471,7 @@ function Trend({ indicator, selectedCycle = "" }: { indicator: Indicator; select
             <XAxis dataKey="period" tick={{ fontSize: 11 }} tickFormatter={(v) => Number.isFinite(Number(v)) ? `Ciclo ${v}` : String(v).slice(0, 10)} />
             <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => isCount ? integer.format(Number(v)) : `${v}%`} />
             <Tooltip labelFormatter={(label) => Number.isFinite(Number(label)) ? `Ciclo ${label}` : label} formatter={(v) => [isCount ? integer.format(Number(v)) : `${Number(v).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%`, "Resultado"]} />
-            <Line type="monotone" dataKey="chartValue" stroke="#3157d5" strokeWidth={2.5} dot={(props: { cx?: number; cy?: number; payload?: { status?: StatusKey } }) => { const color = props.payload?.status === "good" ? "#16845b" : props.payload?.status === "bad" ? "#dc3545" : props.payload?.status === "warning" ? "#d97706" : "#64748b"; return <circle cx={props.cx} cy={props.cy} r={5} fill={color} stroke="#fff" strokeWidth={2} />; }} activeDot={{ r: 6 }} connectNulls><LabelList dataKey="chartValue" position="top" offset={8} formatter={(value) => isCount ? integer.format(Number(value)) : `${Number(value).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%`} /></Line>
+            <Line type="monotone" dataKey="chartValue" stroke="#3157d5" strokeWidth={2.5} dot={(props: { cx?: number; cy?: number; payload?: { status?: StatusKey } }) => { const color = hideMetaStatus ? "#64748b" : props.payload?.status === "good" ? "#16845b" : props.payload?.status === "bad" ? "#dc3545" : props.payload?.status === "warning" ? "#d97706" : "#64748b"; return <circle cx={props.cx} cy={props.cy} r={5} fill={color} stroke="#fff" strokeWidth={2} />; }} activeDot={{ r: 6 }} connectNulls><LabelList dataKey="chartValue" position="top" offset={8} formatter={(value) => isCount ? integer.format(Number(value)) : `${Number(value).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%`} /></Line>
             {rows.some((row) => row.chartTarget != null) && <Line type="monotone" dataKey="chartTarget" stroke="#2e3645" strokeDasharray="6 5" dot={false} />}
             {selected && <ReferenceLine x={selectedCycle} stroke="#f59e0b" strokeDasharray="4 4" label={{ value: `Ciclo ${selectedCycle}`, position: "insideTopRight", fill: "#b45309", fontSize: 11 }} />}
           </LineChart>
@@ -471,23 +481,23 @@ function Trend({ indicator, selectedCycle = "" }: { indicator: Indicator; select
   );
 }
 
-function StoreComparisonChart({ indicator }: { indicator: Indicator }) {
+function StoreComparisonChart({ indicator, hideMetaStatus = false }: { indicator: Indicator; hideMetaStatus?: boolean }) {
   const isCount = COUNT_INDICATORS.has(indicator.id);
   const maxPercent = indicator.id === "quebra-estoque" ? 5 : 100;
-  const rows = indicator.ranking.filter((row) => row.value != null).slice().reverse().map((row) => ({ ...row, chartValue: isCount ? Number(row.value) : Number(row.value) * 100, chartTarget: row.target == null ? null : isCount ? Number(row.target) : Number(row.target) * 100 }));
+  const rows = indicator.ranking.filter((row) => row.value != null).slice().reverse().map((row) => ({ ...row, chartValue: isCount ? Number(row.value) : Number(row.value) * 100, chartTarget: hideMetaStatus || row.target == null ? null : isCount ? Number(row.target) : Number(row.target) * 100 }));
   if (!rows.length) return null;
   const target = rows.find((row) => row.chartTarget != null)?.chartTarget;
   return <section className="panel store-comparison"><h2>Resultado por loja — {indicator.label}</h2><p className="muted">Comparação do resultado atual por loja.</p><div className="chart chart-scroll"><div className="chart-inner"><ResponsiveContainer width="100%" height={340}><BarChart data={rows} margin={{ top: 16, right: 20, left: 8, bottom: 58 }}><CartesianGrid vertical={false} stroke="#e7e9ed" /><XAxis dataKey="store" tick={{ fontSize: 10 }} angle={-35} textAnchor="end" interval={0} /><YAxis domain={isCount ? [0, "auto"] : [0, maxPercent]} unit={isCount ? "" : "%"} tick={{ fontSize: 11 }} /><Tooltip formatter={(value) => [isCount ? integer.format(Number(value)) : `${Number(value).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%`, "Resultado"]} /><Bar dataKey="chartValue" fill="#3157d5" radius={[5, 5, 0, 0]}><LabelList dataKey="chartValue" position="top" formatter={(value) => isCount ? integer.format(Number(value)) : `${Number(value).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%`} /></Bar>{target != null && <ReferenceLine y={target} stroke="#2e3645" strokeDasharray="6 5" label={{ value: `Meta ${isCount ? integer.format(target) : `${Number(target).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%`}`, position: "insideTopRight", fill: "#2e3645", fontSize: 11 }} />}</BarChart></ResponsiveContainer></div></div></section>;
 }
 
-function Ranking({ indicator, onStore, showMedalliaDetails = false }: { indicator: Indicator; onStore: (store: string) => void; showMedalliaDetails?: boolean }) {
+function Ranking({ indicator, onStore, showMedalliaDetails = false, hideMetaStatus = false }: { indicator: Indicator; onStore: (store: string) => void; showMedalliaDetails?: boolean; hideMetaStatus?: boolean }) {
   const rows = indicator.ranking;
   return (
     <div className={`ranking ${indicator.id === "recebimento" ? "receiving-ranking" : ""} ${indicator.id === "medallia" && showMedalliaDetails ? "medallia-ranking" : ""}`}>
       {rows.map((row, index) => (
         <button key={row.store} onClick={() => onStore(row.store)}>
           <span className="rank">{index + 1}</span><span className="store-name">{row.store}<small>{row.storeCode || "Código não informado"}</small>{indicator.id === "medallia" && showMedalliaDetails && <><small className="ranking-detail">{integer.format(indicator.records.filter((item) => item.store === row.store).reduce((sum, item) => sum + Number(item.volume || 0), 0))} respostas</small>{indicator.records.filter((item) => item.store === row.store && item.complaints).map((item, complaintIndex) => <small className="ranking-complaint" key={complaintIndex}>{item.complaints}</small>)}</>}</span>
-          <strong><ResultValue result={row} id={indicator.id} /></strong><Badge status={row.status} informational={isInformational(indicator.id)} />
+          <strong><ResultValue result={row} id={indicator.id} /></strong>{!hideMetaStatus && <Badge status={row.status} informational={isInformational(indicator.id)} />}
         </button>
       ))}
       {!rows.length && <p className="muted">Nenhuma loja disponível neste recorte.</p>}
@@ -543,7 +553,7 @@ function ArruamentoWorkbookAction({ store, storeCode, cycle, currentUser }: { st
   </div>;
 }
 
-function IndicatorDetailTable({ indicator, onStore, currentUser, cycle }: { indicator: Indicator; onStore: (store: string) => void; currentUser: AccessUser; cycle: string }) {
+function IndicatorDetailTable({ indicator, onStore, currentUser, cycle, hideMetaStatus = false }: { indicator: Indicator; onStore: (store: string) => void; currentUser: AccessUser; cycle: string; hideMetaStatus?: boolean }) {
   const rows = indicator.ranking;
   const workbookCycle = cycle || (indicator.id === "arruamento" && typeof indicator.latestKey === "number" ? String(indicator.latestKey) : "");
   const receivingDateKeys = indicator.id === "recebimento"
@@ -599,17 +609,17 @@ function IndicatorDetailTable({ indicator, onStore, currentUser, cycle }: { indi
     return { primary: integer.format(records.length), secondary: notes ? `${integer.format(notes)} observações` : "Sem observações", label: "Registros" };
   };
   const columns = indicator.id === "arruamento"
-      ? ["Loja / código", "SKUs vendidos", "Produtos arruados", "Sem arrumamento", "Resultado", "Situação", "Conferência"]
+      ? ["Loja / código", "SKUs vendidos", "Produtos arruados", "Sem arrumamento", "Resultado", ...(!hideMetaStatus ? ["Situação"] : []), "Conferência"]
     : indicator.id === "recebimento"
-      ? ["Loja / código", "Recebimentos", "Volumes", "Atrasados", "Resultado", "Situação"]
+      ? ["Loja / código", "Recebimentos", "Volumes", "Atrasados", "Resultado", ...(!hideMetaStatus ? ["Situação"] : [])]
     : indicator.id === "retirada"
-      ? ["Loja / código", "Pedidos", "Resultado", "Situação"]
+      ? ["Loja / código", "Pedidos", "Resultado", ...(!hideMetaStatus ? ["Situação"] : [])]
       : indicator.id === "quebra-estoque"
-        ? ["Loja / código", "Itens quebrados", "Itens vendidos", "Índice", "Situação"]
+        ? ["Loja / código", "Itens quebrados", "Itens vendidos", "Índice", ...(!hideMetaStatus ? ["Situação"] : [])]
         : indicator.id === "trilogo"
-          ? ["Loja / código", "Chamados", "Resultado", "Situação"]
-          : ["Loja / código", "Registros", "Resultado", "Situação"];
-  return <div className="indicator-detail-table-wrap"><table className="indicator-detail-table"><thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{rows.map((row) => { const item = detail(row); const receiving = indicator.id === "recebimento"; const stockBreak = indicator.id === "quebra-estoque"; const arrangement = indicator.id === "arruamento"; return <tr key={row.store}><th><button onClick={() => onStore(row.store)}><span>{row.store}</span><small>{row.storeCode || "Código não informado"}</small></button></th>{arrangement ? <><td><strong>{item.skuTotal}</strong></td><td><strong>{item.arranged}</strong></td><td><strong>{item.withoutArrangement}</strong></td></> : <td><strong>{item.primary}</strong>{item.secondary && <small>{item.secondary}</small>}</td>}{receiving && <td><strong>{item.volumes}</strong><small>{item.weeklyVolumes ? `Média ${item.weeklyVolumes}` : ""}</small></td>}{receiving && <td><strong>{item.late}</strong></td>}{stockBreak && <td><strong>{item.sold}</strong></td>}<td><strong>{indicator.id === "retirada" ? integer.format(row.count) : formatValue(row.value, indicator.id)}</strong><small>{row.target == null ? "Sem meta" : `Meta: ${formatTarget(indicator.id, row.target)}`}</small></td><td><Badge status={row.status} informational={isInformational(indicator.id)} /></td>{arrangement && <td><ArruamentoWorkbookAction store={row.store} storeCode={row.storeCode} cycle={workbookCycle} currentUser={currentUser} /></td>}</tr>; })}</tbody></table>{!rows.length && <p className="muted">Nenhuma loja disponível neste recorte.</p>}</div>;
+          ? ["Loja / código", "Chamados", "Resultado", ...(!hideMetaStatus ? ["Situação"] : [])]
+          : ["Loja / código", "Registros", "Resultado", ...(!hideMetaStatus ? ["Situação"] : [])];
+  return <div className="indicator-detail-table-wrap"><table className="indicator-detail-table"><thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{rows.map((row) => { const item = detail(row); const receiving = indicator.id === "recebimento"; const stockBreak = indicator.id === "quebra-estoque"; const arrangement = indicator.id === "arruamento"; return <tr key={row.store}><th><button onClick={() => onStore(row.store)}><span>{row.store}</span><small>{row.storeCode || "Código não informado"}</small></button></th>{arrangement ? <><td><strong>{item.skuTotal}</strong></td><td><strong>{item.arranged}</strong></td><td><strong>{item.withoutArrangement}</strong></td></> : <td><strong>{item.primary}</strong>{item.secondary && <small>{item.secondary}</small>}</td>}{receiving && <td><strong>{item.volumes}</strong><small>{item.weeklyVolumes ? `Média ${item.weeklyVolumes}` : ""}</small></td>}{receiving && <td><strong>{item.late}</strong></td>}{stockBreak && <td><strong>{item.sold}</strong></td>}<td><strong>{indicator.id === "retirada" ? integer.format(row.count) : formatValue(row.value, indicator.id)}</strong>{!hideMetaStatus && <small>{row.target == null ? "Sem meta" : `Meta: ${formatTarget(indicator.id, row.target)}`}</small>}</td>{!hideMetaStatus && <td><Badge status={row.status} informational={isInformational(indicator.id)} /></td>}{arrangement && <td><ArruamentoWorkbookAction store={row.store} storeCode={row.storeCode} cycle={workbookCycle} currentUser={currentUser} /></td>}</tr>; })}</tbody></table>{!rows.length && <p className="muted">Nenhuma loja disponível neste recorte.</p>}</div>;
 }
 
 function indicatorScopeInfo(indicator: Indicator, cycle: string, startDate: string, endDate: string) {
@@ -665,16 +675,16 @@ function RankingSummary({ indicator, cycle = "", startDate = "", endDate = "" }:
   return <>{periodNote}<p className="ranking-summary">Resultado geral: <strong>{overall}</strong></p></>;
 }
 
-function MedalliaTable({ indicator }: { indicator: Indicator }) {
-  return <div className="medallia-table-wrap"><table className="medallia-table"><thead><tr><th>Loja</th><th>Respostas</th><th>Resultado</th><th>Situação</th><th>Reclamações</th></tr></thead><tbody>{indicator.ranking.map((row) => {
+function MedalliaTable({ indicator, hideMetaStatus = false }: { indicator: Indicator; hideMetaStatus?: boolean }) {
+  return <div className="medallia-table-wrap"><table className="medallia-table"><thead><tr><th>Loja</th><th>Respostas</th><th>Resultado</th>{!hideMetaStatus && <th>Situação</th>}<th>Reclamações</th></tr></thead><tbody>{indicator.ranking.map((row) => {
     const records = indicator.records.filter((item) => item.store === row.store);
     const responses = records.reduce((sum, item) => sum + Number(item.volume || 0), 0);
     const complaints = records.filter((item) => item.complaints).map((item) => item.complaints).join(" • ");
-    return <tr key={row.store}><th><span>{row.store}</span><small>{row.storeCode || "Código não informado"}</small></th><td>{integer.format(responses)}</td><td><strong>{formatValue(row.value, "medallia")}</strong></td><td><Badge status={row.status} /></td><td className="medallia-table-complaint">{complaints || "—"}</td></tr>;
+    return <tr key={row.store}><th><span>{row.store}</span><small>{row.storeCode || "Código não informado"}</small></th><td>{integer.format(responses)}</td><td><strong>{formatValue(row.value, "medallia")}</strong></td>{!hideMetaStatus && <td><Badge status={row.status} /></td>}<td className="medallia-table-complaint">{complaints || "—"}</td></tr>;
   })}</tbody></table></div>;
 }
 
-function Matrix({ data, onStore }: { data: DashboardData; onStore: (store: string) => void }) {
+function Matrix({ data, onStore, hideMetaStatus = false }: { data: DashboardData; onStore: (store: string) => void; hideMetaStatus?: boolean }) {
   const visible = data.filters.indicators.slice(0, 9);
   return (
     <div className="table-wrap">
@@ -685,6 +695,7 @@ function Matrix({ data, onStore }: { data: DashboardData; onStore: (store: strin
             <th><button onClick={() => onStore(entry.store)}>{entry.store}<small>{entry.storeCode || "Código não informado"}</small></button></th>
             {visible.map((item) => {
               const result = entry.indicators[item.id] || { status: "unknown" as StatusKey, value: null, target: null };
+              if (hideMetaStatus) return <td key={item.id}><strong className="matrix-result">{formatResult(result, item.id)}</strong></td>;
               const meta = STATUS[result.status] || STATUS.unknown;
               const label = isInformational(item.id) ? "Apenas visualização" : meta.label;
               const targetLabel = isInformational(item.id) ? "Sem meta" : `Meta: ${formatTarget(item.id, result.target)}`;
@@ -1140,6 +1151,10 @@ export default function Home() {
   const openStore = (name: string) => { setActiveStore(name); setView("store"); setMenuOpen(false); };
   const chosen = workingData?.indicators[activeIndicator] || filteredIndicators[0];
   const storeRow = workingData?.stores.find((item) => item.store === activeStore);
+  const hideMetaStatus = cyclesInAnalysisRange(cycle, startDate, endDate) >= 2;
+  useEffect(() => {
+    if (hideMetaStatus && statusFilter) setStatusFilter("");
+  }, [hideMetaStatus, statusFilter]);
   const currentStatuses = workingData ? Object.values(workingData.indicators).map((item) => item.current.status) : [];
   const good = currentStatuses.filter((item) => item === "good").length;
   const bad = currentStatuses.filter((item) => item === "bad").length;
@@ -1185,48 +1200,47 @@ export default function Home() {
         {error && <p className="error-text" role="alert">{error}</p>}
         {sourceWarning && <p className="error-text" role="status">{sourceWarning}</p>}
 
-        {view !== "history" && <Filters data={data} store={store} setStore={setStore} cycle={cycle} setCycle={setCycle} startDate={startDate} setStartDate={setStartDate} endDate={endDate} setEndDate={setEndDate} indicator={indicatorFilter} setIndicator={setIndicatorFilter} status={statusFilter} setStatus={setStatusFilter} />}
+        {view !== "history" && <Filters data={data} store={store} setStore={setStore} cycle={cycle} setCycle={setCycle} startDate={startDate} setStartDate={setStartDate} endDate={endDate} setEndDate={setEndDate} indicator={indicatorFilter} setIndicator={setIndicatorFilter} status={statusFilter} setStatus={setStatusFilter} hideMetaStatus={hideMetaStatus} />}
 
         <div className="content">
           {authError && <p className="auth-message access-error" role="alert">{authError}</p>}
           {view === "overview" && <>
-            <section className="page-head"><div><span className="eyebrow">Visão executiva</span><h1>Visão Geral da Operação</h1><p>O que está saudável, onde agir e quais lojas exigem atenção.</p></div><span className="data-chip">{filteredIndicators.reduce((sum, item) => sum + item.records.length, 0).toLocaleString("pt-BR")} registros no recorte</span></section>
-            {rotationEntry && <section className={`panel overview-rotation-card${rotationPulse ? " rotation-pulse" : ""}`}><div className="section-title"><div><h2>Resumo rotativo</h2><p>Visão 360° de cada loja, com todos os indicadores.</p></div><span className="rotation-timer">Troca após 10s sem interação</span></div><div className="rotation-store-card"><div className="rotation-heading"><span>Visão 360° da loja</span><strong>{rotationEntry.store.store}</strong><small>{rotationEntry.store.storeCode || "—"}</small></div><div className="rotation-store-metrics">{filteredIndicators.map((metric) => { const result = rotationEntry.store.indicators[metric.id]; return <div key={metric.id}><span>{metric.label}</span><strong><ResultValue result={result} id={metric.id} /></strong><Badge status={result?.status || "unknown"} informational={isInformational(metric.id)} /></div>; })}</div></div><div className="rotation-dots" aria-label="Navegação do resumo rotativo"><button type="button" onClick={() => { lastOverviewInteraction.current = Date.now(); setOverviewRotation((rotationPosition - 1 + rotationTotal) % rotationTotal); }}>‹</button><span>{rotationPosition + 1} / {rotationTotal}</span><button type="button" onClick={() => { lastOverviewInteraction.current = Date.now(); setOverviewRotation((rotationPosition + 1) % rotationTotal); }}>›</button></div></section>}
+            <section className="page-head"><div><span className="eyebrow">Visão executiva</span><h1>Visão Geral da Operação</h1><p>{hideMetaStatus ? "Resultados consolidados das lojas no período selecionado." : "O que está saudável, onde agir e quais lojas exigem atenção."}</p></div><span className="data-chip">{filteredIndicators.reduce((sum, item) => sum + item.records.length, 0).toLocaleString("pt-BR")} registros no recorte</span></section>
+            {rotationEntry && <section className={`panel overview-rotation-card${rotationPulse ? " rotation-pulse" : ""}`}><div className="section-title"><div><h2>Resumo rotativo</h2><p>Visão 360° de cada loja, com todos os indicadores.</p></div><span className="rotation-timer">Troca após 10s sem interação</span></div><div className="rotation-store-card"><div className="rotation-heading"><span>Visão 360° da loja</span><strong>{rotationEntry.store.store}</strong><small>{rotationEntry.store.storeCode || "—"}</small></div><div className="rotation-store-metrics">{filteredIndicators.map((metric) => { const result = rotationEntry.store.indicators[metric.id]; return <div key={metric.id}><span>{metric.label}</span><strong><ResultValue result={result} id={metric.id} /></strong>{!hideMetaStatus && <Badge status={result?.status || "unknown"} informational={isInformational(metric.id)} />}</div>; })}</div></div><div className="rotation-dots" aria-label="Navegação do resumo rotativo"><button type="button" onClick={() => { lastOverviewInteraction.current = Date.now(); setOverviewRotation((rotationPosition - 1 + rotationTotal) % rotationTotal); }}>‹</button><span>{rotationPosition + 1} / {rotationTotal}</span><button type="button" onClick={() => { lastOverviewInteraction.current = Date.now(); setOverviewRotation((rotationPosition + 1) % rotationTotal); }}>›</button></div></section>}
             <section className="summary-grid">
               <article><Building2 /><span>Lojas analisadas</span><strong>{workingData.stores.length}</strong></article>
-              <article><CircleGauge /><span>Indicadores dentro</span><strong>{good}</strong></article>
-              <article><AlertTriangle /><span>Indicadores fora</span><strong>{bad}</strong></article>
+              {hideMetaStatus ? <article><BarChart3 /><span>Ciclos no período</span><strong>{cyclesInAnalysisRange(cycle, startDate, endDate)}</strong></article> : <><article><CircleGauge /><span>Indicadores dentro</span><strong>{good}</strong></article><article><AlertTriangle /><span>Indicadores fora</span><strong>{bad}</strong></article></>}
             </section>
-            <section><div className="section-title"><div><h2>Indicadores principais</h2><p>Resultado do período e dos filtros selecionados.</p></div></div><div className="kpi-grid">{filteredIndicators.filter((item) => !statusFilter || item.current.status === statusFilter).map((item) => <KpiCard key={item.id} indicator={item} storeSelected={store.length > 0} onOpen={() => openIndicator(item.id)} />)}</div></section>
+            <section><div className="section-title"><div><h2>Indicadores principais</h2><p>Resultado do período e dos filtros selecionados.</p></div></div><div className="kpi-grid">{filteredIndicators.filter((item) => hideMetaStatus || !statusFilter || item.current.status === statusFilter).map((item) => <KpiCard key={item.id} indicator={item} storeSelected={store.length > 0} hideMetaStatus={hideMetaStatus} onOpen={() => openIndicator(item.id)} />)}</div></section>
             <section className="two-col">
-              <article className="panel"><div className="section-title"><div><h2>{evolutionIndicator ? (isWithdrawal(evolutionIndicator.id) ? evolutionIndicator.label : trendTitle(evolutionIndicator)) : "Evolução do indicador"}</h2><p>{evolutionIndicator ? `Valores exibidos em ${trendUnit(evolutionIndicator.id)}.` : "Selecione um indicador"}</p></div></div>{evolutionIndicator && (isWithdrawal(evolutionIndicator.id) ? <Ranking indicator={evolutionIndicator} onStore={openStore} /> : <Trend indicator={evolutionIndicator} selectedCycle={cycle} />)}</article>
+              <article className="panel"><div className="section-title"><div><h2>{evolutionIndicator ? (isWithdrawal(evolutionIndicator.id) ? evolutionIndicator.label : trendTitle(evolutionIndicator)) : "Evolução do indicador"}</h2><p>{evolutionIndicator ? `Valores exibidos em ${trendUnit(evolutionIndicator.id)}.` : "Selecione um indicador"}</p></div></div>{evolutionIndicator && (isWithdrawal(evolutionIndicator.id) ? <Ranking indicator={evolutionIndicator} onStore={openStore} hideMetaStatus={hideMetaStatus} /> : <Trend indicator={evolutionIndicator} selectedCycle={cycle} hideMetaStatus={hideMetaStatus} />)}</article>
             </section>
-            <section className="panel"><div className="section-title"><div><h2>Mapa de performance</h2><p>Clique em uma loja para abrir a visão 360°.</p></div></div><Matrix data={presentationData || workingData} onStore={openStore} /></section>
+            <section className="panel"><div className="section-title"><div><h2>Mapa de performance</h2><p>Clique em uma loja para abrir a visão 360°.</p></div></div><Matrix data={presentationData || workingData} onStore={openStore} hideMetaStatus={hideMetaStatus} /></section>
           </>}
 
           {view === "indicator" && chosen && <>
-            <section className="page-head"><div><span className="eyebrow">Indicador</span><h1>{chosen.label}</h1><p>Meta, evolução, ranking e registros normalizados.</p></div><div className="page-head-actions"><button className="refresh" type="button" onClick={() => exportIndicatorExcel(chosen, { cycle, startDate, endDate, stores: store, status: statusFilter }, data.source.fileName)}><Download size={16} />Exportar Excel</button>{(!isWithdrawal(chosen.id) || store.length > 0) && <Badge status={chosen.current.status} informational={isInformational(chosen.id)} />}</div></section>
-             <section className="summary-grid three"><article><span>{isWithdrawal(chosen.id) ? "Situação" : "Resultado geral"}</span><strong>{isWithdrawal(chosen.id) ? store.length === 1 ? <><ResultValue result={chosen.current} id={chosen.id} /> pedidos em atraso</> : "\u00a0" : <ResultValue result={chosen.current} id={chosen.id} />}</strong></article><article><span>Meta</span><strong>{isInformational(chosen.id) ? "Apenas visualização" : formatTarget(chosen.id, chosen.current.target)}</strong></article><article><span>{isWithdrawal(chosen.id) ? "Apuração" : "Diferença"}</span><strong>{isWithdrawal(chosen.id) ? chosen.label : isInformational(chosen.id) ? "Não se aplica" : deltaText(chosen.current.value, chosen.current.target, chosen.direction, chosen.id)}</strong></article></section>
+            <section className="page-head"><div><span className="eyebrow">Indicador</span><h1>{chosen.label}</h1><p>{hideMetaStatus ? "Resultado consolidado do período selecionado." : "Meta, evolução, ranking e registros normalizados."}</p></div><div className="page-head-actions"><button className="refresh" type="button" onClick={() => exportIndicatorExcel(chosen, { cycle, startDate, endDate, stores: store, status: hideMetaStatus ? "" : statusFilter }, data.source.fileName)}><Download size={16} />Exportar Excel</button>{!hideMetaStatus && (!isWithdrawal(chosen.id) || store.length > 0) && <Badge status={chosen.current.status} informational={isInformational(chosen.id)} />}</div></section>
+             <section className={`summary-grid ${hideMetaStatus ? "" : "three"}`}><article><span>{hideMetaStatus ? "Resultado do período" : isWithdrawal(chosen.id) ? "Situação" : "Resultado geral"}</span><strong>{isWithdrawal(chosen.id) && !hideMetaStatus ? store.length === 1 ? <><ResultValue result={chosen.current} id={chosen.id} /> pedidos em atraso</> : "\u00a0" : <ResultValue result={chosen.current} id={chosen.id} />}</strong></article>{!hideMetaStatus && <><article><span>Meta</span><strong>{isInformational(chosen.id) ? "Apenas visualização" : formatTarget(chosen.id, chosen.current.target)}</strong></article><article><span>{isWithdrawal(chosen.id) ? "Apuração" : "Diferença"}</span><strong>{isWithdrawal(chosen.id) ? chosen.label : isInformational(chosen.id) ? "Não se aplica" : deltaText(chosen.current.value, chosen.current.target, chosen.direction, chosen.id)}</strong></article></>}</section>
              {isWithdrawal(chosen.id)
-                  ? <><section className="panel"><h2>{chosen.label}</h2><RankingSummary indicator={chosen} cycle={cycle} startDate={startDate} endDate={endDate} /><IndicatorDetailTable indicator={chosen} onStore={openStore} currentUser={currentUser} cycle={cycle} /></section><StoreComparisonChart indicator={chosen} /><section className="panel"><h2>{trendTitle(chosen)}</h2><Trend indicator={chosen} selectedCycle={cycle} /></section></>
+                  ? <><section className="panel"><h2>{chosen.label}</h2><RankingSummary indicator={chosen} cycle={cycle} startDate={startDate} endDate={endDate} /><IndicatorDetailTable indicator={chosen} onStore={openStore} currentUser={currentUser} cycle={cycle} hideMetaStatus={hideMetaStatus} /></section><StoreComparisonChart indicator={chosen} hideMetaStatus={hideMetaStatus} /><section className="panel"><h2>{trendTitle(chosen)}</h2><Trend indicator={chosen} selectedCycle={cycle} hideMetaStatus={hideMetaStatus} /></section></>
                 : chosen.id === "medallia"
-                  ? <><section className="panel medallia-list-panel"><h2>{chosen.label}</h2><RankingSummary indicator={chosen} cycle={cycle} startDate={startDate} endDate={endDate} /><MedalliaTable indicator={chosen} /></section><StoreComparisonChart indicator={chosen} /><section className="panel"><h2>{trendTitle(chosen)}</h2><Trend indicator={chosen} selectedCycle={cycle} /></section></>
-                  : <><section className="panel"><h2>{chosen.label}</h2><RankingSummary indicator={chosen} cycle={cycle} startDate={startDate} endDate={endDate} />{DETAILED_INDICATORS.has(chosen.id) ? <IndicatorDetailTable indicator={chosen} onStore={openStore} currentUser={currentUser} cycle={cycle} /> : <Ranking indicator={chosen} onStore={openStore} showMedalliaDetails={Boolean(cycle)} />}</section><StoreComparisonChart indicator={chosen} /><section className="panel"><h2>{trendTitle(chosen)}</h2><Trend indicator={chosen} selectedCycle={cycle} /></section></>}
+                  ? <><section className="panel medallia-list-panel"><h2>{chosen.label}</h2><RankingSummary indicator={chosen} cycle={cycle} startDate={startDate} endDate={endDate} /><MedalliaTable indicator={chosen} hideMetaStatus={hideMetaStatus} /></section><StoreComparisonChart indicator={chosen} hideMetaStatus={hideMetaStatus} /><section className="panel"><h2>{trendTitle(chosen)}</h2><Trend indicator={chosen} selectedCycle={cycle} hideMetaStatus={hideMetaStatus} /></section></>
+                  : <><section className="panel"><h2>{chosen.label}</h2><RankingSummary indicator={chosen} cycle={cycle} startDate={startDate} endDate={endDate} />{DETAILED_INDICATORS.has(chosen.id) ? <IndicatorDetailTable indicator={chosen} onStore={openStore} currentUser={currentUser} cycle={cycle} hideMetaStatus={hideMetaStatus} /> : <Ranking indicator={chosen} onStore={openStore} showMedalliaDetails={Boolean(cycle)} hideMetaStatus={hideMetaStatus} />}</section><StoreComparisonChart indicator={chosen} hideMetaStatus={hideMetaStatus} /><section className="panel"><h2>{trendTitle(chosen)}</h2><Trend indicator={chosen} selectedCycle={cycle} hideMetaStatus={hideMetaStatus} /></section></>}
              {chosen.id === "medallia" && !cycle && <section className="panel"><h2>Principais reclamações</h2><div className="complaints">{chosen.records.filter((item) => item.complaints).slice(-12).map((item, index) => <button key={index} onClick={() => openStore(item.store)}><strong>{item.store} <small>{item.storeCode}</small></strong><span>{item.complaints}</span></button>)}</div></section>}
-            {chosen.id.endsWith("cancelados") && <section className="panel"><h2>Saldo Total por loja</h2><p className="muted">Percentual direto da planilha — abaixo de 2% é melhor.</p><div className="chart"><ResponsiveContainer width="100%" height={360}><BarChart data={chosen.ranking.slice().reverse().map((item) => ({ ...item, valuePct: (item.value || 0) * 100 }))} layout="vertical"><CartesianGrid horizontal={false} stroke="#e7e9ed" /><XAxis type="number" unit="%" domain={[0, 100]} /><YAxis dataKey="store" type="category" width={110} tick={{ fontSize: 11 }} /><Tooltip formatter={(value) => [`${Number(value).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%`, "Saldo Total"]} /><ReferenceLine x={2} stroke="#f59e0b" strokeDasharray="4 4" label={{ value: "Meta 2%", position: "insideTopRight", fill: "#b45309", fontSize: 11 }} /><Bar dataKey="valuePct" fill="#3157d5" radius={[0, 5, 5, 0]} /></BarChart></ResponsiveContainer></div></section>}
+            {chosen.id.endsWith("cancelados") && <section className="panel"><h2>Saldo Total por loja</h2><p className="muted">{hideMetaStatus ? "Percentual direto da planilha no período selecionado." : "Percentual direto da planilha — abaixo de 2% é melhor."}</p><div className="chart"><ResponsiveContainer width="100%" height={360}><BarChart data={chosen.ranking.slice().reverse().map((item) => ({ ...item, valuePct: (item.value || 0) * 100 }))} layout="vertical"><CartesianGrid horizontal={false} stroke="#e7e9ed" /><XAxis type="number" unit="%" domain={[0, 100]} /><YAxis dataKey="store" type="category" width={110} tick={{ fontSize: 11 }} /><Tooltip formatter={(value) => [`${Number(value).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%`, "Saldo Total"]} />{!hideMetaStatus && <ReferenceLine x={2} stroke="#f59e0b" strokeDasharray="4 4" label={{ value: "Meta 2%", position: "insideTopRight", fill: "#b45309", fontSize: 11 }} />}<Bar dataKey="valuePct" fill="#3157d5" radius={[0, 5, 5, 0]} /></BarChart></ResponsiveContainer></div></section>}
           </>}
 
           {view === "store" && storeRow && <>
             <section className="page-head"><div><span className="eyebrow">Visão 360° da Loja</span><h1 className="store-title">{storeRow.store} <small>{storeRow.storeCode}</small></h1><p>Todos os indicadores disponíveis no período selecionado.</p></div><button className="back" onClick={() => setView("overview")}>Voltar à visão geral</button></section>
             <div className="kpi-grid">{(presentationData || workingData).filters.indicators.map((item) => {
               const result = storeRow.indicators[item.id]; const source = workingData.indicators[item.id];
-              return <button className="kpi-card" key={item.id} onClick={() => openIndicator(item.id)}><span className="kpi-label">{item.label}</span><strong><ResultValue result={result} id={item.id} /></strong><span className="kpi-meta">{isInformational(item.id) ? "Sem meta • apenas visualização" : `Meta: ${formatTarget(item.id, result?.target ?? null)}`}</span><Badge status={result?.status || "unknown"} informational={isInformational(item.id)} /><ChevronRight className="kpi-arrow" size={17} />{source?.records.some((r) => r.store === storeRow.store && r.complaints) && <span className="has-note">Possui reclamações registradas</span>}</button>;
+              return <button className="kpi-card" key={item.id} onClick={() => openIndicator(item.id)}><span className="kpi-label">{item.label}</span><strong><ResultValue result={result} id={item.id} /></strong>{!hideMetaStatus && <><span className="kpi-meta">{isInformational(item.id) ? "Sem meta • apenas visualização" : `Meta: ${formatTarget(item.id, result?.target ?? null)}`}</span><Badge status={result?.status || "unknown"} informational={isInformational(item.id)} /></>}<ChevronRight className="kpi-arrow" size={17} />{source?.records.some((r) => r.store === storeRow.store && r.complaints) && <span className="has-note">Possui reclamações registradas</span>}</button>;
             })}</div>
           </>}
 
-          {view === "stores" && <><section className="page-head"><div><span className="eyebrow">Lojas</span><h1>Visão 360° por loja</h1><p>Selecione uma unidade para detalhar sua operação.</p></div></section><div className="store-grid">{workingData.stores.map((item) => <button key={item.store} onClick={() => openStore(item.store)}><Store /><strong>{item.store}</strong><small className="store-code">{item.storeCode}</small><span>{Object.values(item.indicators).filter((result) => result.status === "bad").length} pontos de atenção</span><ChevronRight /></button>)}</div></>}
+          {view === "stores" && <><section className="page-head"><div><span className="eyebrow">Lojas</span><h1>Visão 360° por loja</h1><p>Selecione uma unidade para detalhar sua operação.</p></div></section><div className="store-grid">{workingData.stores.map((item) => <button key={item.store} onClick={() => openStore(item.store)}><Store /><strong>{item.store}</strong><small className="store-code">{item.storeCode}</small><span>{hideMetaStatus ? `${Object.values(item.indicators).filter((result) => result.value != null).length} resultados no período` : `${Object.values(item.indicators).filter((result) => result.status === "bad").length} pontos de atenção`}</span><ChevronRight /></button>)}</div></>}
 
-          {view === "ranking" && <><section className="page-head"><div><span className="eyebrow">Benchmark interno</span><h1>Ranking de Lojas</h1><p>Melhores e piores resultados por indicador.</p></div></section><article className="panel attention ranking-priority-card"><div className="section-title"><div><h2>Prioridade de ação</h2><p>Ocorrências fora da meta, ordenadas pelo maior desvio.</p></div></div><div className="alert-list">{priorityAlerts.map((item, index) => <button key={`${item.store}-${item.indicator}-${index}`} onClick={() => openStore(item.store)}><AlertTriangle size={17} /><span><strong>{item.store} <small>{item.storeCode}</small></strong><small>{workingData.indicators[item.indicator]?.label} • {formatResult(item, item.indicator)} • {formatGap(item.gap, item.indicator)}</small></span><ChevronRight size={16} /></button>)}{!priorityAlerts.length && <p className="muted">Nenhuma ocorrência crítica calculável.</p>}</div></article><div className="indicator-panels">{filteredIndicators.map((item) => <article className="panel" key={item.id}><h2>{item.label}</h2><Ranking indicator={item} onStore={openStore} /></article>)}</div></>}
+          {view === "ranking" && <><section className="page-head"><div><span className="eyebrow">Benchmark interno</span><h1>Ranking de Lojas</h1><p>{hideMetaStatus ? "Resultados consolidados no período selecionado." : "Melhores e piores resultados por indicador."}</p></div></section>{!hideMetaStatus && <article className="panel attention ranking-priority-card"><div className="section-title"><div><h2>Prioridade de ação</h2><p>Ocorrências fora da meta, ordenadas pelo maior desvio.</p></div></div><div className="alert-list">{priorityAlerts.map((item, index) => <button key={`${item.store}-${item.indicator}-${index}`} onClick={() => openStore(item.store)}><AlertTriangle size={17} /><span><strong>{item.store} <small>{item.storeCode}</small></strong><small>{workingData.indicators[item.indicator]?.label} • {formatResult(item, item.indicator)} • {formatGap(item.gap, item.indicator)}</small></span><ChevronRight size={16} /></button>)}{!priorityAlerts.length && <p className="muted">Nenhuma ocorrência crítica calculável.</p>}</div></article>}<div className="indicator-panels">{filteredIndicators.map((item) => <article className="panel" key={item.id}><h2>{item.label}</h2><Ranking indicator={item} onStore={openStore} hideMetaStatus={hideMetaStatus} /></article>)}</div></>}
 
           {view === "performance" && <OrdersView data={data} selectedStore={store} cycle={cycle} startDate={startDate} endDate={endDate} onImported={() => load(true)} />}
 
