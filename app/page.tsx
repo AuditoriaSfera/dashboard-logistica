@@ -429,16 +429,11 @@ function metaDifference(indicator: Indicator, result: Result) {
 }
 
 function attentionMessage(entry: StoreAttentionEntry, period: string) {
-  const points = entry.issues.map((issue) => {
-    const missed = issue.cycles.filter(({ result }) => result.status === "bad");
-    const details = missed.slice(0, 4).map(({ cycle: cycleName, result }) => `Ciclo ${cycleName}: ${formatValue(result.value, issue.indicator.id)}, faltaram ${metaDifference(issue.indicator, result).replace(/^faltaram /, "")}.`);
-    if (missed.length > 4) details.push(`Mais ${missed.length - 4} ciclo(s) com resultado abaixo da meta.`);
-    const summary = details.length ? details.join(" ") : issue.cycles.length
-      ? "acompanhar a posição relativa no comparativo; as metas por ciclo foram atingidas no período."
-      : "acompanhar a posição relativa no comparativo; não há resultados por ciclo disponíveis neste recorte.";
-    return `• ${issue.indicator.label}: ${summary}`;
-  });
-  return `Olá, supervisor(a) da loja ${entry.store}, tudo bem?\n\nNa análise do período ${period}, a unidade apareceu entre as lojas que precisam de acompanhamento, com ${entry.issues.length} indicador(es) entre as últimas posições do comparativo.\n\nPontos para revisão:\n${points.join("\n")}\n\nPor favor, avalie os resultados, identifique as causas e compartilhe as ações previstas. Se precisar de apoio, estamos à disposição.\n\nObrigado(a).`;
+  const failures = entry.issues.flatMap((issue) => issue.cycles
+    .filter(({ result }) => result.status === "bad")
+    .map(({ cycle: cycleName, result }) => `• ${issue.indicator.label}, ciclo ${cycleName}: resultado ${formatValue(result.value, issue.indicator.id)}; meta ${formatTarget(issue.indicator.id, result.target)} (${metaDifference(issue.indicator, result)}).`));
+  if (!failures.length) return `Olá, supervisor(a) da loja ${entry.store}. No período ${period}, não foram identificadas metas descumpridas. A unidade aparece em posições de atenção no comparativo; por favor, acompanhe os indicadores. Obrigado(a).`;
+  return `Olá, supervisor(a) da loja ${entry.store}. No período ${period}, estes resultados não atingiram a meta:\n${failures.join("\n")}\nPor favor, verifique os pontos e nos informe as ações previstas. Obrigado(a).`;
 }
 
 function RankingAttentionList({ entries, period }: { entries: StoreAttentionEntry[]; period: string }) {
@@ -452,7 +447,10 @@ function RankingAttentionList({ entries, period }: { entries: StoreAttentionEntr
   };
   return <article className="panel attention ranking-priority-card"><div className="section-title"><div><h2>Lojas que merecem atenção</h2><p>Ordenadas pela quantidade de indicadores entre as piores posições; empates pelo pior posicionamento individual.</p></div><span className="table-hint">{entries.length} loja(s)</span></div>{entries.length ? <div className="attention-store-list">{entries.map((entry, index) => {
     const message = attentionMessage(entry, period);
-    return <details className="attention-store" key={entry.store}><summary><span className="attention-rank">{index + 1}</span><span className="attention-store-name"><strong>{entry.store}</strong><small>{entry.storeCode || "Código não informado"}</small></span><span className="attention-count">{entry.issues.length} indicador(es) entre as piores</span><span className="attention-worst">Pior posição: {entry.issues[0]?.bottomRank}ª pior</span></summary><div className="attention-details"><div className="attention-indicators">{entry.issues.map((issue) => <section className="attention-indicator" key={issue.indicator.id}><h3>{issue.indicator.label}<small>{issue.bottomRank}ª pior loja neste indicador · posição {issue.rank} de {issue.total}</small></h3>{issue.cycles.length ? <ul>{issue.cycles.map(({ cycle: cycleName, result }) => <li key={cycleName}><strong>Ciclo {cycleName}:</strong> {formatValue(result.value, issue.indicator.id)} · {metaDifference(issue.indicator, result)}{result.target != null && <> (meta: {formatTarget(issue.indicator.id, result.target)})</>}</li>)}</ul> : <p className="muted">Sem registros por ciclo neste recorte.</p>}</section>)}</div><div className="attention-message"><label htmlFor={`whatsapp-message-${index}`}>Mensagem profissional para o supervisor</label><textarea id={`whatsapp-message-${index}`} readOnly value={message} rows={Math.min(10, 4 + entry.issues.length)} /><div className="attention-message-actions"><button type="button" onClick={() => void copyMessage(entry)}>{copiedStore === entry.store ? "Mensagem copiada" : "Copiar mensagem"}</button><a href={`https://wa.me/?text=${encodeURIComponent(message)}`} target="_blank" rel="noreferrer">Abrir WhatsApp</a></div></div></div></details>;
+    const failures = entry.issues.flatMap((issue) => issue.cycles
+      .filter(({ result }) => result.status === "bad")
+      .map(({ cycle: cycleName, result }) => ({ issue, cycle: cycleName, result })));
+    return <details className="attention-store" key={entry.store}><summary><span className="attention-rank">{index + 1}</span><span className="attention-store-name"><strong>{entry.store}</strong><small>{entry.storeCode || "Código não informado"}</small></span><span className="attention-count">{entry.issues.length} indicador(es) nas piores posições</span><span className="attention-worst">Pior colocação: {entry.issues[0]?.bottomRank}ª pior</span></summary><div className="attention-details"><div className="attention-indicators"><h3>Metas não atingidas</h3>{failures.length ? failures.map(({ issue, cycle: cycleName, result }, failureIndex) => <div className="attention-failure" key={`${issue.indicator.id}-${cycleName}-${failureIndex}`}><strong>{issue.indicator.label} · Ciclo {cycleName}</strong><span>Resultado: {formatValue(result.value, issue.indicator.id)} · Meta: {formatTarget(issue.indicator.id, result.target)} · {metaDifference(issue.indicator, result)}</span></div>) : <p className="muted">Nenhuma meta descumprida neste período.</p>}</div><div className="attention-message"><label htmlFor={`whatsapp-message-${index}`}>Mensagem direta para o supervisor</label><textarea id={`whatsapp-message-${index}`} readOnly value={message} rows={5} /><div className="attention-message-actions"><button type="button" onClick={() => void copyMessage(entry)}>{copiedStore === entry.store ? "Copiada" : "Copiar"}</button><a href={`https://wa.me/?text=${encodeURIComponent(message)}`} target="_blank" rel="noreferrer">WhatsApp</a></div></div></div></details>;
   })}</div> : <p className="muted">Nenhuma loja está fora das 7 melhores posições neste período.</p>}</article>;
 }
 
