@@ -14,7 +14,7 @@ function loadPortalScript() {
   if (window.SferaBacklogMount) return Promise.resolve();
   if (!scriptReady) scriptReady = new Promise<void>((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "/backlog/portal.js?v=shared-1";
+    script.src = "/backlog/portal.js?v=shared-2";
     script.onload = () => resolve();
     script.onerror = () => { script.remove(); scriptReady = null; reject(new Error("Não foi possível carregar o portal de pedidos.")); };
     document.head.appendChild(script);
@@ -59,6 +59,6 @@ export function BacklogPortal({ userId }: { userId: string }) {
     {loading && <p className="muted" role="status">Carregando portal de pedidos…</p>}
     {error && <p className="error-text" role="alert">{error}</p>}
     <div ref={host} />
-    <p className="muted">Base compartilhada da última importação, com acesso às lojas da sua conta. Atualização automática a cada 10 segundos. Relatórios salvos ficam neste navegador.</p>
+    <p className="muted">Base compartilhada das últimas importações de retirada e entrega, com acesso às lojas da sua conta. Atualização automática a cada 10 segundos. Relatórios salvos ficam neste navegador.</p>
   </section>;
 }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { scopeBacklog, validateBacklog } from '../server/backlog.mjs';
+import { scopeBacklog, validateBacklog, withImport } from '../server/backlog.mjs';
 
 const row = (id,channel,delivery='No endereço de entrega') => ({id,channel,delivery,status:'Aprovado',fiscal:'Não faturado',date:'2026-11-23'});
 const base = {name:'teste.xlsx',version:'v1',importedAt:'2026-11-23T12:00:00Z',rows:[row('1','20740 - Madureira'),row('2','20740 - Madureira','Retirada na Central'),row('3','19826 - Partage'),row('4','23433 - Caratinga'),row('5','99999 - Madureira')],history:[{importedAt:'2026-11-22T12:00:00Z',byStore:{20740:3,19826:10}},{importedAt:'2026-11-23T12:00:00Z',byStore:{20740:2,19826:1,23433:1,99999:1}}]};
@@ -32,4 +32,18 @@ test('backlog validation rejects invalid imports and strips extra fields from pe
   assert.throws(()=>validateBacklog({rows:[row('1','Madureira')]}));
   const validated=validateBacklog({name:'test.xlsx',rows:[{...row('1','20740 - Madureira'),privateField:'discard'}]});
   assert.equal(Object.hasOwn(validated.rows[0],'privateField'),false);
+});
+test('separate imports replace only their own modality and count the entire resulting backlog', () => {
+  const pickup = validateBacklog({ name:'retirada.xlsx', rows:[row('6','20740 - Madureira','Retirar na Central de Serviços')] });
+  const afterPickup = withImport(base, pickup);
+  assert.deepEqual(afterPickup.rows.map(item=>item.id), ['1','3','4','5','6']);
+  assert.deepEqual(afterPickup.importsByType.address, {name:base.name, importedAt:base.importedAt});
+  assert.equal(afterPickup.history.at(-1).byStore[20740], 2);
+
+  const delivery = validateBacklog({ name:'entrega.xlsx', rows:[row('7','20740 - Madureira')] });
+  const afterDelivery = withImport(afterPickup, delivery);
+  assert.deepEqual(afterDelivery.rows.map(item=>item.id), ['6','7']);
+  assert.deepEqual(afterDelivery.importsByType.pickup, afterPickup.importsByType.pickup);
+  assert.equal(afterDelivery.history.at(-1).byStore[20740], 2);
+  assert.throws(() => validateBacklog({rows:[row('8','20740 - Madureira','Outro')]}), /tipo de entrega/i);
 });
