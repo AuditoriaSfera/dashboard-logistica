@@ -14,7 +14,7 @@ function loadPortalScript() {
   if (window.SferaBacklogMount) return Promise.resolve();
   if (!scriptReady) scriptReady = new Promise<void>((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "/backlog/portal.js?v=shared-4";
+    script.src = "/backlog/portal.js?v=shared-5";
     script.onload = () => resolve();
     script.onerror = () => { script.remove(); scriptReady = null; reject(new Error("Não foi possível carregar o portal de pedidos.")); };
     document.head.appendChild(script);
@@ -34,7 +34,7 @@ export function BacklogPortal({ userId }: { userId: string }) {
     const load = async () => {
       try {
         const [markup, styles, xlsx] = await Promise.all([
-          fetch("/backlog/interface.html?v=shared-4", { signal: controller.signal }).then((response) => { if (!response.ok) throw new Error("Falha ao carregar a interface."); return response.text(); }),
+          fetch("/backlog/interface.html?v=shared-5", { signal: controller.signal }).then((response) => { if (!response.ok) throw new Error("Falha ao carregar a interface."); return response.text(); }),
           fetch("/backlog/style.css", { signal: controller.signal }).then((response) => { if (!response.ok) throw new Error("Falha ao carregar o visual."); return response.text(); }),
           import("xlsx"), loadPortalScript(),
         ]);
