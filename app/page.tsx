@@ -14,6 +14,7 @@ import * as XLSX from "xlsx";
 import { AccessUser, authRequest } from "./auth-client";
 import { AuthScreen, PasswordChangeScreen, CadastroView } from "./access-components";
 import { ImportHistoryView, type ImportHistoryEntry } from "./import-history-view";
+import { BacklogPortal } from "./backlog-portal";
 
 // O serviço auxiliar só existe no ambiente local. Fora do computador de
 // desenvolvimento, as atualizações devem usar as rotas same-origin do app.
@@ -1280,7 +1281,7 @@ export default function Home() {
   const rotationEntry = rotationEntries[rotationPosition];
   const evolutionIndicator = filteredIndicators.find((item) => item.trend.length > 1) || chosen;
     const nav = [
-    ["overview", "Visão Geral", LayoutDashboard], ["stores", "360° Por Loja", Store],
+    ["overview", "Visão Geral", LayoutDashboard], ["backlog", "Portal de Pedidos", FileSpreadsheet], ["stores", "360° Por Loja", Store],
     ["ranking", "Ranking", Trophy], ["performance", "Pedidos", CircleGauge], ["recurrence", "Recorrência", Users],
     ["quality", "Qualidade dos dados", Database], ["cadastro", "Usuários", Users], ["profile", "Meu perfil", UserCircle], ["settings", "Configurações", Settings], ["audit", "Auditoria", ClipboardList], ["history", "Histórico", History],
   ] as const;
@@ -1311,9 +1312,10 @@ export default function Home() {
         {error && <p className="error-text" role="alert">{error}</p>}
         {sourceWarning && <p className="error-text" role="status">{sourceWarning}</p>}
 
-        {view !== "history" && <Filters data={data} store={store} setStore={setStore} cycle={cycle} setCycle={setCycle} startDate={startDate} setStartDate={setStartDate} endDate={endDate} setEndDate={setEndDate} indicator={indicatorFilter} setIndicator={setIndicatorFilter} status={statusFilter} setStatus={setStatusFilter} hideMetaStatus={hideMetaStatus} />}
+        {view !== "history" && view !== "backlog" && <Filters data={data} store={store} setStore={setStore} cycle={cycle} setCycle={setCycle} startDate={startDate} setStartDate={setStartDate} endDate={endDate} setEndDate={setEndDate} indicator={indicatorFilter} setIndicator={setIndicatorFilter} status={statusFilter} setStatus={setStatusFilter} hideMetaStatus={hideMetaStatus} />}
 
         <div className="content">
+          {view === "backlog" && <BacklogPortal userId={currentUser.id} />}
           {authError && <p className="auth-message access-error" role="alert">{authError}</p>}
           {view === "overview" && <>
             <section className="page-head"><div><span className="eyebrow">Visão executiva</span><h1>Visão Geral da Operação</h1><p>{hideMetaStatus ? "Resultados consolidados das lojas no período selecionado." : "O que está saudável, onde agir e quais lojas exigem atenção."}</p></div><span className="data-chip">{filteredIndicators.reduce((sum, item) => sum + item.records.length, 0).toLocaleString("pt-BR")} registros no recorte</span></section>
