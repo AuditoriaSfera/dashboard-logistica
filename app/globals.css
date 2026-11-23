@@ -37,6 +37,17 @@ button:focus-visible, select:focus-visible { outline: 3px solid #9eb0f0; outline
 .sidebar nav, .nav-group { display: grid; gap: 3px; margin-top: 18px; }
 .sidebar nav button, .nav-group button { display: flex; align-items: center; gap: 10px; border: 0; background: transparent; color: #aeb7c8; padding: 9px 10px; text-align: left; border-radius: 8px; font-size: 13px; cursor: pointer; }
 .sidebar nav button:hover, .nav-group button:hover, .sidebar button.active { color: white; background: #273147; }
+.portal-nav-group { min-width: 0; }
+.portal-nav-heading { display: flex; align-items: center; gap: 2px; }
+.sidebar nav .portal-nav-heading button { margin: 0; }
+.sidebar nav .portal-nav-heading .portal-nav-main { flex: 1; min-width: 0; }
+.sidebar nav .portal-nav-heading .portal-nav-toggle { width: 32px; justify-content: center; padding: 8px; }
+.portal-nav-toggle svg { transition: transform .18s ease; }
+.portal-nav-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
+.portal-nav-submenus { display: grid; gap: 2px; padding: 3px 0 7px 13px; border-left: 1px solid #354157; margin: 3px 0 4px 18px; }
+.sidebar nav .portal-nav-submenus > span { color: #77849a; text-transform: uppercase; letter-spacing: .08em; font-size: 9px; font-weight: 750; padding: 9px 8px 3px; }
+.sidebar nav .portal-nav-submenus button { color: #aeb7c8; font-size: 11px; padding: 7px 9px; }
+.sidebar nav .portal-nav-submenus button:hover, .sidebar nav .portal-nav-submenus button.active { color: white; background: #273147; }
 .nav-group > span { color: #707c92; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; font-size: 10px; padding: 10px 10px 5px; }
 .source-mini { margin-top: auto; display: flex; align-items: center; gap: 9px; border-top: 1px solid #2a3344; padding: 17px 8px 2px; }
 .source-mini div { display: grid; overflow: hidden; }

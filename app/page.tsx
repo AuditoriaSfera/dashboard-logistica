@@ -988,6 +988,10 @@ export default function Home() {
   const [refreshing, setRefreshing] = useState(false);
   const [view, setView] = useState("overview");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [portalMenusOpen, setPortalMenusOpen] = useState(false);
+  const [portalType, setPortalType] = useState("address");
+  const [portalState, setPortalState] = useState("");
+  const [portalSection, setPortalSection] = useState("orders");
   const [store, setStore] = useState<string[]>([]);
   const [cycle, setCycle] = useState("");
   const [startDate, setStartDate] = useState("");
@@ -1286,6 +1290,14 @@ export default function Home() {
     ["quality", "Qualidade dos dados", Database], ["cadastro", "Usuários", Users], ["profile", "Meu perfil", UserCircle], ["settings", "Configurações", Settings], ["audit", "Auditoria", ClipboardList], ["history", "Histórico", History],
   ] as const;
     const restrictedViews = new Set(["performance", "recurrence", "quality", "cadastro", "settings", "audit", "history"]);
+  const selectPortalMenu = (kind: "view" | "type" | "state", value: string) => {
+    if (kind === "view") setPortalSection(value);
+    if (kind === "type") setPortalType(value);
+    if (kind === "state") setPortalState(value);
+    window.dispatchEvent(new CustomEvent("sfera-backlog-navigate", { detail: { kind, value } }));
+    setView("backlog");
+    setMenuOpen(false);
+  };
 
   if (!authReady) return <main className="fatal"><RefreshCw className="spin" size={36} /><h1>Preparando acesso</h1></main>;
   if (authError && !currentUser) return <main className="fatal"><h1>Não foi possível verificar o acesso</h1><p>{authError}</p><button onClick={() => void refreshSession()}>Tentar novamente</button></main>;
@@ -1298,7 +1310,17 @@ export default function Home() {
     <div className="app-shell">
       <aside className={`sidebar ${menuOpen ? "open" : ""}`}>
         <div className="brand"><img className="sidebar-logo" src="/dashboard-mark-transparent.png" alt="Sfera Operações" /><div><small>Performance de lojas</small></div><button className="close-menu" onClick={() => setMenuOpen(false)}><X /></button></div>
-        <nav>{nav.filter(([id]) => currentUser.accountType === "admin" || !restrictedViews.has(id)).map(([id, label, Icon]) => <button key={id} className={view === id ? "active" : ""} onClick={() => { setView(id); setMenuOpen(false); }}><Icon size={18} />{label}</button>)}</nav>
+        <nav>{nav.filter(([id]) => currentUser.accountType === "admin" || !restrictedViews.has(id)).map(([id, label, Icon]) => id === "backlog" ? <div className={`portal-nav-group${view === "backlog" ? " selected" : ""}`} key={id}>
+          <div className="portal-nav-heading"><button className={`portal-nav-main${view === "backlog" ? " active" : ""}`} onClick={() => { setView("backlog"); setPortalSection("orders"); setPortalType("address"); setPortalState(""); setPortalMenusOpen(true); setMenuOpen(false); }}><Icon size={18} />{label}</button><button className="portal-nav-toggle" aria-label={portalMenusOpen ? "Ocultar menus do Portal de Pedidos" : "Expandir menus do Portal de Pedidos"} aria-expanded={portalMenusOpen} onClick={() => setPortalMenusOpen((open) => !open)}><ChevronRight size={16} /></button></div>
+          {portalMenusOpen && <div className="portal-nav-submenus">
+            <span>Tipo de pedido</span>
+            {[["all", "Todos os pedidos"], ["address", "Pedidos de entrega"], ["pickup", "Retirada na Central"], ["omni", "Pedidos Omnichannel"]].map(([value, text]) => <button key={value} className={portalType === value ? "active" : ""} onClick={() => selectPortalMenu("type", value)}>{text}</button>)}
+            <span>Estados</span>
+            {[["", "Todos os estados"], ["RJ", "Rio de Janeiro"], ["MG", "Minas Gerais"]].map(([value, text]) => <button key={value || "all-states"} className={portalState === value ? "active" : ""} onClick={() => selectPortalMenu("state", value)}>{text}</button>)}
+            <span>Operação</span>
+            {[["orders", "Pedidos não faturados"], ["dashboard", "Backlog diário"], ...(currentUser.accountType === "admin" ? [["import", "Importar planilha"]] : []), ["directory", "Lojas e responsáveis"], ["comparisons", "Comparações de backlog"], ["history", "Histórico de relatórios"]].map(([value, text]) => <button key={value} className={portalSection === value ? "active" : ""} onClick={() => selectPortalMenu("view", value)}>{text}</button>)}
+          </div>}
+        </div> : <button key={id} className={view === id ? "active" : ""} onClick={() => { setView(id); setMenuOpen(false); }}><Icon size={18} />{label}</button>)}</nav>
         <div className="nav-group"><span>Indicadores</span>{data.filters.indicators.map((item) => <button key={item.id} className={view === "indicator" && activeIndicator === item.id ? "active" : ""} onClick={() => openIndicator(item.id)}><BarChart3 size={16} />{item.label}</button>)}</div>
         <div className="source-mini"><Database size={16} /><div><strong>Fonte conectada</strong><small>{data.source.fileName}</small></div></div>
       </aside>

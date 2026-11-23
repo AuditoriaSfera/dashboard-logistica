@@ -27,6 +27,8 @@ async function synchronize(){
 }
 const listenRoot = (event, callback) => root.addEventListener(event, callback, {signal:lifecycle.signal});
 const listenWindow = (event, callback) => window.addEventListener(event, callback, {signal:lifecycle.signal});
+let hasExternalNavigation=false;
+listenWindow('sfera-backlog-navigate',event=>{const {kind,value}=event.detail||{};if(!kind)return;const attribute=kind==='view'?'data-view':kind==='type'?'data-type':kind==='state'?'data-state':'';if(!attribute)return;const button=[...root.querySelectorAll('['+attribute+']')].find(node=>node.getAttribute(attribute)===String(value));if(button&&!button.hidden){hasExternalNavigation=true;button.click()}});
 const $=s=>root.querySelector(s), KEY=storagePrefix+'backlog-v3', HIST=storagePrefix+'history-v1', COUNTS=storagePrefix+'import-counts-v1';
 let base={name:'Nenhuma base importada',rows:[]},collapsed=new Set(),activeReport=null,orderType='address',orderPage=1;
 const typeLabels={all:'Todos os pedidos',address:'Pedidos de entrega',pickup:'Retirada na Central',omni:'Pedidos Omnichannel'};
@@ -181,7 +183,7 @@ root.querySelectorAll('[data-type]').forEach(b=>b.onclick=()=>{orderType=b.datas
 root.querySelectorAll('[data-state]').forEach(button=>button.onclick=()=>{activeState=button.dataset.state;if($('#ordersView').hidden&&$('#dashboardView').hidden)view('orders');render()});
 function closeMenu(){portalBody.classList.remove('menu-open');$('#menuOverlay').hidden=true;$('#menuToggle').setAttribute('aria-expanded','false')}
 $('#menuToggle').onclick=()=>{const open=portalBody.classList.toggle('menu-open');$('#menuOverlay').hidden=!open;$('#menuToggle').setAttribute('aria-expanded',String(open))};$('#menuOverlay').onclick=closeMenu;root.querySelectorAll('[data-view],[data-type],[data-state]').forEach(b=>b.addEventListener('click',()=>{if(window.innerWidth<=760)closeMenu()}));listenRoot('keydown',e=>{if(e.key==='Escape')closeMenu()});
-async function init(){await synchronize();if(stopped)return;options();render();view('orders');accessControls();syncTimer=setInterval(()=>void synchronize(),10000);}const ready=init();
+async function init(){await synchronize();if(stopped)return;options();render();if(!hasExternalNavigation)view('orders');accessControls();syncTimer=setInterval(()=>void synchronize(),10000);}const ready=init();
 
 return {ready, dispose(){stopped=true;lifecycle.abort();clearTimeout(toastTimer);clearInterval(syncTimer);}};
 };
