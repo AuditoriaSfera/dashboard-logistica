@@ -164,9 +164,7 @@ function parseMedallia(rows, indicator) {
     if (rowCycle != null) activeCycle = rowCycle;
     const labelIndex = row.findIndex((cell) => normalizeText(cell).includes("nps total"));
     if (labelIndex < 0) return;
-    // A linha consolidada pode trazer a quantidade de respostas antes do NPS.
-    // O percentual consolidado é o último valor numérico nessa linha.
-    const total = row.slice(labelIndex + 1).map(number).filter((item) => item != null).at(-1);
+    const total = row.slice(labelIndex + 1).map(number).find((item) => item != null);
     if (activeCycle != null && total != null) generalByCycle.set(String(activeCycle), total);
   });
   return rows.slice(headerIndex + 1).flatMap((row, rowOffset) => {
