@@ -4,7 +4,15 @@ const portalBody = root.querySelector('.portal-root');
 let toastTimer, syncTimer, syncing=false, importing=false, accessSignature='';
 let canImport=false, allowedStoreCodes=new Set(), stopped=false;
 const syncStatus=document.createElement('p');syncStatus.setAttribute('role','status');syncStatus.style.cssText='margin:0 0 10px;color:#64748b;font:12px Segoe UI,sans-serif';portalBody.querySelector('main').prepend(syncStatus);
-function accessControls(){for(const node of root.querySelectorAll('[data-view="import"],#importTop,#file,#saveDirectory')){node.hidden=!canImport;if('disabled' in node)node.disabled=!canImport;}if(!canImport){for(const node of root.querySelectorAll('#directoryTable input,#directoryTable select'))node.disabled=true;}}
+function accessControls() {
+  for (const node of root.querySelectorAll('[data-view="import"],#importTop,#file,#saveDirectory,.store-share')) {
+    node.hidden = !canImport;
+    if ('disabled' in node) node.disabled = !canImport;
+  }
+  if (!canImport) {
+    for (const node of root.querySelectorAll('#directoryTable input,#directoryTable select')) node.disabled = true;
+  }
+}
 async function synchronize(){
  if(syncing||importing||stopped)return;syncing=true;
  try{const response=await fetch('/api/backlog',{cache:'no-store',credentials:'same-origin',signal:lifecycle.signal});const data=await response.json();if(!response.ok)throw Object.assign(new Error(data.error||'Falha ao atualizar.'),{status:response.status});
