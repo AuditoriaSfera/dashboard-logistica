@@ -3,7 +3,7 @@ const lifecycle = new AbortController();
 const portalBody = root.querySelector('.portal-root');
 let toastTimer, syncTimer, syncing=false, importing=false, accessSignature='';
 let canImport=false, allowedStoreCodes=new Set(), stopped=false;
-let overdueUsers=[], overdueUsersLoaded=false, overdueUsersLoading=false, overdueType="all";
+let overdueUsers=[], overdueUsersLoaded=false, overdueUsersLoading=false, overdueType="all", overduePageIndex=0;
 const syncStatus=document.createElement('p');syncStatus.setAttribute('role','status');syncStatus.style.cssText='margin:0 0 10px;color:#64748b;font:12px Segoe UI,sans-serif';portalBody.querySelector('main').prepend(syncStatus);
 function accessControls() {
   if (canImport && !overdueUsersLoaded && !overdueUsersLoading) void loadOverdueUsers();
