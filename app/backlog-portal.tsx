@@ -15,7 +15,7 @@ function loadPortalScript() {
   if (window.SferaBacklogMount) return Promise.resolve();
   if (!scriptReady) scriptReady = new Promise<void>((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "/backlog/portal.js?v=shared-9";
+    script.src = "/backlog/portal.js?v=arruamento-10";
     script.onload = () => resolve();
     script.onerror = () => { script.remove(); scriptReady = null; reject(new Error("Não foi possível carregar o portal de pedidos.")); };
     document.head.appendChild(script);
@@ -28,7 +28,7 @@ function loadArruamentoScript() {
   if (window.SferaArruamentoMount) return Promise.resolve();
   if (!arruamentoScriptReady) arruamentoScriptReady = new Promise<void>((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "/backlog/arruamento.js?v=3";
+    script.src = "/backlog/arruamento.js?v=4";
     script.onload = () => resolve();
     script.onerror = () => { script.remove(); arruamentoScriptReady = null; reject(new Error("Não foi possível carregar o módulo de Arruamento.")); };
     document.head.appendChild(script);

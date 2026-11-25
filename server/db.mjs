@@ -223,11 +223,42 @@ export async function saveArruamentoPortalSource(sql, { store, storeCode, year, 
   });
 }
 
+export async function loadArruamentoPortalSnapshot(sql, store, year, cycle) {
+  await ensureSchema(sql);
+  const [row] = await sql`select snapshot from public.arruamento_portal_snapshots
+    where store_key = ${arruamentoStoreKey(store)} and year = ${Number(year)} and cycle = ${Number(cycle)}`;
+  return row?.snapshot ?? null;
+}
+
+export async function saveArruamentoPortalSnapshot(sql, snapshot) {
+  await ensureSchema(sql);
+  const storeKey = arruamentoStoreKey(snapshot?.store);
+  const storeCode = String(snapshot?.code ?? "");
+  if (!storeKey || !/^\d{5}$/.test(storeCode)) throw new Error("Snapshot de Arruamento sem loja válida.");
+  await sql`insert into public.arruamento_portal_snapshots (store_key, store, store_code, year, cycle, snapshot)
+    values (${storeKey}, ${snapshot.store}, ${storeCode}, ${Number(snapshot.year)}, ${Number(snapshot.cycle)}, ${JSON.stringify(snapshot)}::jsonb)
+    on conflict (store_key, year, cycle) do update set store = excluded.store, store_code = excluded.store_code,
+      snapshot = excluded.snapshot, updated_at = now()`;
+}
+
+export async function listArruamentoPortalSnapshots(sql, stores, admin = false) {
+  await ensureSchema(sql);
+  const allowedKeys = (stores || []).map(arruamentoStoreKey).filter(Boolean);
+  const rows = admin
+    ? await sql`select snapshot from public.arruamento_portal_snapshots order by year desc, cycle desc, store`
+    : allowedKeys.length
+      ? await sql`select snapshot from public.arruamento_portal_snapshots where store_key = any(${allowedKeys}) order by year desc, cycle desc, store`
+      : [];
+  return rows.map((row) => row.snapshot).filter(Boolean);
+}
+
 export async function deleteArruamentoPortalSources(sql, { store, year, cycle }) {
   await ensureSchema(sql);
   const storeKey = arruamentoStoreKey(store);
   if (!storeKey) throw new Error("Informe a loja da planilha de Arruamento.");
   await sql`delete from public.arruamento_portal_workbooks
+    where store_key = ${storeKey} and year = ${Number(year) || 2026} and cycle = ${Number(cycle)}`;
+  await sql`delete from public.arruamento_portal_snapshots
     where store_key = ${storeKey} and year = ${Number(year) || 2026} and cycle = ${Number(cycle)}`;
 }
 

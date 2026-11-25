@@ -1,6 +1,6 @@
 import { createPublicKey, verify } from "node:crypto";
 import { NextResponse } from "next/server";
-import { databaseConfigured, deleteArruamentoPortalSources, getSql, loadArruamentoPortalSource, saveArruamentoPortalSource } from "../../../../server/db.mjs";
+import { databaseConfigured, deleteArruamentoPortalSources, getSql, loadArruamentoPortalSnapshot, loadArruamentoPortalSource, saveArruamentoPortalSnapshot, saveArruamentoPortalSource } from "../../../../server/db.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -86,6 +86,9 @@ export async function POST(request: Request) {
     await deleteArruamentoPortalSources(sql, { store, year, cycle });
     return NextResponse.json({ ok: true, deleted: true, store, year, cycle }, { headers: { "Cache-Control": "no-store" } });
   }
+
+  const existingSnapshot = await loadArruamentoPortalSnapshot(sql, store, year, cycle);
+  if (JSON.stringify(existingSnapshot) !== JSON.stringify(snapshot)) await saveArruamentoPortalSnapshot(sql, snapshot);
 
   const imported = snapshotCsvs(snapshot);
   let changed = false;
