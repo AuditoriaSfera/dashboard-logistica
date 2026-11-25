@@ -181,6 +181,48 @@ export async function loadArruamentoWorkbook(sql, store, cycle) {
   return row?.content ? { store: row.store, storeCode: row.store_code, cycle: row.cycle, fileName: row.file_name, bytes: Buffer.from(row.content), updatedAt: row.updated_at?.toISOString?.() ?? null } : null;
 }
 
+const arruamentoSourceTypes = new Set(["addresses", "sales"]);
+export async function listArruamentoPortalSources(sql, stores, admin = false) {
+  await ensureSchema(sql);
+  const allowedKeys = (stores || []).map(arruamentoStoreKey).filter(Boolean);
+  const rows = admin
+    ? await sql`select store, store_code, year, cycle, source_type, file_name, octet_length(content)::int as bytes, updated_at from public.arruamento_portal_workbooks order by store, year desc, cycle desc, source_type`
+    : allowedKeys.length
+      ? await sql`select store, store_code, year, cycle, source_type, file_name, octet_length(content)::int as bytes, updated_at from public.arruamento_portal_workbooks where store_key = any(${allowedKeys}) order by store, year desc, cycle desc, source_type`
+      : [];
+  const history = admin
+    ? await sql`select store, store_code, year, cycle, source_type, file_name, bytes, imported_at from public.arruamento_portal_import_history order by imported_at desc limit 500`
+    : allowedKeys.length
+      ? await sql`select store, store_code, year, cycle, source_type, file_name, bytes, imported_at from public.arruamento_portal_import_history where store_key = any(${allowedKeys}) order by imported_at desc limit 500`
+      : [];
+  return {
+    sources: rows.map((row) => ({ ...row, updatedAt: row.updated_at?.toISOString?.() ?? null, updated_at: undefined })),
+    history: history.map((row) => ({ ...row, importedAt: row.imported_at?.toISOString?.() ?? null, imported_at: undefined })),
+  };
+}
+
+export async function loadArruamentoPortalSource(sql, store, year, cycle, sourceType) {
+  await ensureSchema(sql);
+  if (!arruamentoSourceTypes.has(sourceType)) return null;
+  const [row] = await sql`select store, store_code, year, cycle, source_type, file_name, content, updated_at from public.arruamento_portal_workbooks where store_key = ${arruamentoStoreKey(store)} and year = ${Number(year) || 2026} and cycle = ${Number(cycle) || 0} and source_type = ${sourceType}`;
+  return row?.content ? { ...row, bytes: Buffer.from(row.content), updatedAt: row.updated_at?.toISOString?.() ?? null } : null;
+}
+
+export async function saveArruamentoPortalSource(sql, { store, storeCode, year, cycle, sourceType, fileName, bytes }) {
+  await ensureSchema(sql);
+  if (!arruamentoSourceTypes.has(sourceType)) throw new Error("Tipo de planilha de arruamento inválido.");
+  const storeKey = arruamentoStoreKey(store);
+  if (!storeKey) throw new Error("Informe a loja da planilha de arruamento.");
+  await sql.begin(async (tx) => {
+    await tx`insert into public.arruamento_portal_workbooks (store_key, store, store_code, year, cycle, source_type, file_name, content)
+      values (${storeKey}, ${store}, ${storeCode}, ${Number(year) || 2026}, ${Number(cycle)}, ${sourceType}, ${fileName}, ${bytes})
+      on conflict (store_key, year, cycle, source_type) do update set store = excluded.store, store_code = excluded.store_code,
+        file_name = excluded.file_name, content = excluded.content, updated_at = now()`;
+    await tx`insert into public.arruamento_portal_import_history (store_key, store, store_code, year, cycle, source_type, file_name, bytes)
+      values (${storeKey}, ${store}, ${storeCode}, ${Number(year) || 2026}, ${Number(cycle)}, ${sourceType}, ${fileName}, ${bytes.length})`;
+  });
+}
+
 // ───────────── Acesso (usuários, sessões, tentativas de login) ─────────────
 
 const ACCESS_LOCK = 727001;

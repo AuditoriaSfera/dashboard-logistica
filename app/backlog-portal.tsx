@@ -6,6 +6,7 @@ type PortalInstance = { ready: Promise<void>; dispose: () => void };
 declare global {
   interface Window {
     SferaBacklogMount?: (root: ShadowRoot, xlsx: unknown, storagePrefix: string) => PortalInstance;
+    SferaArruamentoMount?: (root: ShadowRoot, xlsx: unknown, canImport: () => boolean) => void;
   }
 }
 
@@ -14,12 +15,25 @@ function loadPortalScript() {
   if (window.SferaBacklogMount) return Promise.resolve();
   if (!scriptReady) scriptReady = new Promise<void>((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "/backlog/portal.js?v=shared-7";
+    script.src = "/backlog/portal.js?v=shared-9";
     script.onload = () => resolve();
     script.onerror = () => { script.remove(); scriptReady = null; reject(new Error("Não foi possível carregar o portal de pedidos.")); };
     document.head.appendChild(script);
   });
   return scriptReady;
+}
+
+let arruamentoScriptReady: Promise<void> | null = null;
+function loadArruamentoScript() {
+  if (window.SferaArruamentoMount) return Promise.resolve();
+  if (!arruamentoScriptReady) arruamentoScriptReady = new Promise<void>((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "/backlog/arruamento.js?v=3";
+    script.onload = () => resolve();
+    script.onerror = () => { script.remove(); arruamentoScriptReady = null; reject(new Error("Não foi possível carregar o módulo de Arruamento.")); };
+    document.head.appendChild(script);
+  });
+  return arruamentoScriptReady;
 }
 
 export function BacklogPortal({ userId }: { userId: string }) {
@@ -34,9 +48,9 @@ export function BacklogPortal({ userId }: { userId: string }) {
     const load = async () => {
       try {
         const [markup, styles, xlsx] = await Promise.all([
-          fetch("/backlog/interface.html?v=shared-7", { signal: controller.signal }).then((response) => { if (!response.ok) throw new Error("Falha ao carregar a interface."); return response.text(); }),
-          fetch("/backlog/style.css?v=shared-7", { signal: controller.signal }).then((response) => { if (!response.ok) throw new Error("Falha ao carregar o visual."); return response.text(); }),
-          import("xlsx"), loadPortalScript(),
+          fetch("/backlog/interface.html?v=shared-9", { signal: controller.signal }).then((response) => { if (!response.ok) throw new Error("Falha ao carregar a interface."); return response.text(); }),
+          fetch("/backlog/style.css?v=shared-9", { signal: controller.signal }).then((response) => { if (!response.ok) throw new Error("Falha ao carregar o visual."); return response.text(); }),
+          import("xlsx"), loadPortalScript(), loadArruamentoScript(),
         ]);
         if (cancelled) return;
         root.innerHTML = "";
@@ -46,6 +60,7 @@ export function BacklogPortal({ userId }: { userId: string }) {
         root.appendChild(template.content.cloneNode(true));
         if (!window.SferaBacklogMount) throw new Error("Portal indisponível. Recarregue a página.");
         instance = window.SferaBacklogMount(root, xlsx, `sfera-portal-${userId}-`);
+        window.SferaArruamentoMount?.(root, xlsx, () => (root.querySelector('[data-view="import"]') as HTMLElement | null)?.hidden === false);
         await instance.ready;
         if (!cancelled) setLoading(false);
       } catch (caught) {
