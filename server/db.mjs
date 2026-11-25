@@ -223,6 +223,14 @@ export async function saveArruamentoPortalSource(sql, { store, storeCode, year, 
   });
 }
 
+export async function deleteArruamentoPortalSources(sql, { store, year, cycle }) {
+  await ensureSchema(sql);
+  const storeKey = arruamentoStoreKey(store);
+  if (!storeKey) throw new Error("Informe a loja da planilha de Arruamento.");
+  await sql`delete from public.arruamento_portal_workbooks
+    where store_key = ${storeKey} and year = ${Number(year) || 2026} and cycle = ${Number(cycle)}`;
+}
+
 // ───────────── Acesso (usuários, sessões, tentativas de login) ─────────────
 
 const ACCESS_LOCK = 727001;
