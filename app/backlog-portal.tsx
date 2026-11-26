@@ -15,7 +15,7 @@ function loadPortalScript() {
   if (window.SferaBacklogMount) return Promise.resolve();
   if (!scriptReady) scriptReady = new Promise<void>((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "/backlog/portal.js?v=arruamento-10";
+    script.src = "/backlog/portal.js?v=arruamento-11";
     script.onload = () => resolve();
     script.onerror = () => { script.remove(); scriptReady = null; reject(new Error("Não foi possível carregar o portal de pedidos.")); };
     document.head.appendChild(script);
