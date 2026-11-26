@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { authorize } from '../../../server/auth.mjs';
 import { loadBacklog, saveBacklog, scopeBacklog, storeDirectory } from '../../../server/backlog.mjs';
+import { recordNewlyOverdueOrders } from '../../../server/retirada-overdue.mjs';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -10,7 +11,9 @@ export async function GET(request: Request) {
   const access = await authorize(request);
   if (access.error) return access.error;
   try {
-    return NextResponse.json(scopeBacklog(await loadBacklog(),access.user,await storeDirectory()),{headers});
+    const base = await loadBacklog();
+    await recordNewlyOverdueOrders(base);
+    return NextResponse.json(scopeBacklog(base,access.user,await storeDirectory()),{headers});
   } catch { return NextResponse.json({error:'Não foi possível consultar a base compartilhada. Tente novamente.'},{status:503,headers}); }
 }
 
@@ -30,6 +33,7 @@ export async function POST(request: Request) {
   } catch { return NextResponse.json({error:'Envie uma base JSON válida.'},{status:400,headers}); }
   try {
     const base = await saveBacklog(input);
+    await recordNewlyOverdueOrders(base);
     return NextResponse.json(scopeBacklog(base,access.user,await storeDirectory()),{headers});
   } catch (error) { return NextResponse.json({error:error instanceof Error && /pedidos|base válida/.test(error.message)?error.message:'Não foi possível salvar a importação. A base anterior foi preservada.'},{status:503,headers}); }
 }

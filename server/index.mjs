@@ -5,6 +5,9 @@ import express from "express";
 import { GET as authGet, POST as authPost } from "./auth.mjs";
 import { databaseConfigured, getSql, logOrderImport, syncDashboardToDatabase } from "./db.mjs";
 import { findDefaultWorkbook, parseWorkbook } from "./parser.mjs";
+import { loadBacklog } from "./backlog.mjs";
+import { applyReceivingRegisterToDashboard, listReceivingInvoices } from "./receiving.mjs";
+import { applyRetiradaOverdueEvents, listRetiradaOverdueEvents, recordNewlyOverdueOrders } from "./retirada-overdue.mjs";
 
 const PORT = Number(process.env.OPERATIONS_API_PORT || 8788);
 const workbookPath = findDefaultWorkbook();
@@ -229,8 +232,17 @@ app.get("/api/health", (_request, response) => {
 app.get("/api/dashboard", async (_request, response) => {
   try {
     if (!cache) await refresh("startup");
-    const orders = cache.orders ? (({ records, ...summary }) => summary)(cache.orders) : cache.orders;
-    response.json({ ...cache, orders });
+    let snapshot = cache;
+    try {
+      const backlog = await loadBacklog();
+      await recordNewlyOverdueOrders(backlog);
+      if (databaseConfigured()) snapshot = applyReceivingRegisterToDashboard(snapshot, await listReceivingInvoices(getSql()));
+      snapshot = applyRetiradaOverdueEvents(snapshot, await listRetiradaOverdueEvents());
+    } catch (error) {
+      console.warn("[atrasos] Não foi possível atualizar o indicador Retirada:", error?.code || error?.message);
+    }
+    const orders = snapshot.orders ? (({ records, ...summary }) => summary)(snapshot.orders) : snapshot.orders;
+    response.json({ ...snapshot, orders });
   } catch (error) {
     response.status(503).json({ error: error.message, lastError });
   }

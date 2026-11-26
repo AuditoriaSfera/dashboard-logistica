@@ -15,6 +15,7 @@ import { AccessUser, authRequest } from "./auth-client";
 import { AuthScreen, PasswordChangeScreen, CadastroView } from "./access-components";
 import { ImportHistoryView, type ImportHistoryEntry } from "./import-history-view";
 import { BacklogPortal } from "./backlog-portal";
+import { ReceivingView } from "./receiving-view";
 
 // O serviço auxiliar só existe no ambiente local. Fora do computador de
 // desenvolvimento, as atualizações devem usar as rotas same-origin do app.
@@ -656,7 +657,7 @@ function IndicatorDetailTable({ indicator, onStore, currentUser, cycle, hideMeta
     : 7;
   const receivingWeeks = Math.max(1, receivingDays / 7);
   const weeklyVolume = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 });
-  const detail = (row: (typeof rows)[number]): { primary: string; secondary: string; late?: string; volumes?: string; weeklyVolumes?: string; sold?: string; occurrences?: string; issueBreakdown?: string; skuTotal?: string; arranged?: string; withoutArrangement?: string; label?: string } => {
+  const detail = (row: (typeof rows)[number]): { primary: string; secondary: string; late?: string; volumes?: string; weeklyVolumes?: string; sold?: string; occurrences?: string; issueBreakdown?: string; skuTotal?: string; arranged?: string; withoutArrangement?: string; overdueOrders?: string[]; label?: string } => {
     let records = indicator.records.filter((item) => item.store === row.store);
     if (indicator.id === "recebimento") {
       // `indicator.records` já chega recortado pelo ciclo/data global. Não
@@ -686,7 +687,8 @@ function IndicatorDetailTable({ indicator, onStore, currentUser, cycle, hideMeta
         const entries = String(item.notes || "").split(",").map((value) => value.trim()).filter(Boolean);
         return sum + (entries.length || 0);
       }, 0);
-      return { primary: integer.format(pedidos), secondary: "", label: "Pedidos" };
+      const overdueOrders = [...new Set(records.map((item) => String(item.raw?.overdueOrderCode || "")).filter(Boolean))];
+      return { primary: integer.format(pedidos), secondary: "", overdueOrders, label: "Pedidos" };
     }
     if (indicator.id === "trilogo") {
       const open = records.filter((item) => normalizeText(item.statusSource).includes("aberto")).length;
@@ -705,13 +707,13 @@ function IndicatorDetailTable({ indicator, onStore, currentUser, cycle, hideMeta
     : indicator.id === "recebimento"
       ? ["Loja / código", "Recebimentos", "Volumes", "Atrasados", "Resultado", ...(!hideMetaStatus ? ["Situação"] : [])]
     : indicator.id === "retirada"
-      ? ["Loja / código", "Pedidos", "Resultado", ...(!hideMetaStatus ? ["Situação"] : [])]
+      ? ["Loja / código", "Pedidos", "Novos atrasos contabilizados", "Resultado", ...(!hideMetaStatus ? ["Situação"] : [])]
       : indicator.id === "quebra-estoque"
         ? ["Loja / código", "Itens quebrados", "Itens vendidos", "Índice", ...(!hideMetaStatus ? ["Situação"] : [])]
         : indicator.id === "trilogo"
           ? ["Loja / código", "Chamados", "Resultado", ...(!hideMetaStatus ? ["Situação"] : [])]
           : ["Loja / código", "Registros", "Resultado", ...(!hideMetaStatus ? ["Situação"] : [])];
-  return <div className="indicator-detail-table-wrap"><table className="indicator-detail-table"><thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{rows.map((row) => { const item = detail(row); const receiving = indicator.id === "recebimento"; const stockBreak = indicator.id === "quebra-estoque"; const arrangement = indicator.id === "arruamento"; return <tr key={row.store}><th><button onClick={() => onStore(row.store)}><span>{row.store}</span><small>{row.storeCode || "Código não informado"}</small></button></th>{arrangement ? <><td><strong>{item.skuTotal}</strong></td><td><strong>{item.arranged}</strong></td><td><strong>{item.withoutArrangement}</strong></td></> : <td><strong>{item.primary}</strong>{item.secondary && <small>{item.secondary}</small>}</td>}{receiving && <td><strong>{item.volumes}</strong><small>{item.weeklyVolumes ? `Média ${item.weeklyVolumes}` : ""}</small></td>}{receiving && <td><strong>{item.late}</strong></td>}{stockBreak && <td><strong>{item.sold}</strong></td>}<td><strong>{indicator.id === "retirada" ? integer.format(row.count) : formatValue(row.value, indicator.id)}</strong><StorePlacement indicator={indicator} store={row.store} />{!hideMetaStatus && <small>{row.target == null ? "Sem meta" : `Meta: ${formatTarget(indicator.id, row.target)}`}</small>}</td>{!hideMetaStatus && <td><Badge status={row.status} informational={isInformational(indicator.id)} /></td>}{arrangement && <td><ArruamentoWorkbookAction store={row.store} storeCode={row.storeCode} cycle={workbookCycle} currentUser={currentUser} /></td>}</tr>; })}</tbody></table>{!rows.length && <p className="muted">Nenhuma loja disponível neste recorte.</p>}</div>;
+  return <div className="indicator-detail-table-wrap"><table className="indicator-detail-table"><thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{rows.map((row) => { const item = detail(row); const receiving = indicator.id === "recebimento"; const withdrawal = indicator.id === "retirada"; const stockBreak = indicator.id === "quebra-estoque"; const arrangement = indicator.id === "arruamento"; return <tr key={row.store}><th><button onClick={() => onStore(row.store)}><span>{row.store}</span><small>{row.storeCode || "Código não informado"}</small></button></th>{arrangement ? <><td><strong>{item.skuTotal}</strong></td><td><strong>{item.arranged}</strong></td><td><strong>{item.withoutArrangement}</strong></td></> : <td><strong>{item.primary}</strong>{item.secondary && <small>{item.secondary}</small>}</td>}{receiving && <td><strong>{item.volumes}</strong><small>{item.weeklyVolumes ? `Média ${item.weeklyVolumes}` : ""}</small></td>}{receiving && <td><strong>{item.late}</strong></td>}{withdrawal && <td className="retirada-overdue-orders">{item.overdueOrders?.length ? item.overdueOrders.map((code) => <span key={code}>{code}</span>) : <small>Sem atraso novo no período</small>}</td>}{stockBreak && <td><strong>{item.sold}</strong></td>}<td><strong>{withdrawal ? integer.format(row.count) : formatValue(row.value, indicator.id)}</strong><StorePlacement indicator={indicator} store={row.store} />{!hideMetaStatus && <small>{row.target == null ? "Sem meta" : `Meta: ${formatTarget(indicator.id, row.target)}`}</small>}</td>{!hideMetaStatus && <td><Badge status={row.status} informational={isInformational(indicator.id)} /></td>}{arrangement && <td><ArruamentoWorkbookAction store={row.store} storeCode={row.storeCode} cycle={workbookCycle} currentUser={currentUser} /></td>}</tr>; })}</tbody></table>{!rows.length && <p className="muted">Nenhuma loja disponível neste recorte.</p>}</div>;
 }
 
 function indicatorScopeInfo(indicator: Indicator, cycle: string, startDate: string, endDate: string) {
@@ -1185,6 +1187,22 @@ export default function Home() {
   }, [load, currentUser?.id, currentUser?.mustChangePassword]);
 
   useEffect(() => {
+    if (!currentUser || currentUser.mustChangePassword) return;
+    const saoPauloDate = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+    let checkedDate = saoPauloDate();
+    const checkDate = () => {
+      const currentDate = saoPauloDate();
+      if (currentDate === checkedDate) return;
+      checkedDate = currentDate;
+      if (document.visibilityState === "visible") void load(false);
+    };
+    const timer = window.setInterval(checkDate, 60_000);
+    window.addEventListener("focus", checkDate);
+    document.addEventListener("visibilitychange", checkDate);
+    return () => { window.clearInterval(timer); window.removeEventListener("focus", checkDate); document.removeEventListener("visibilitychange", checkDate); };
+  }, [currentUser?.id, currentUser?.mustChangePassword, load]);
+
+  useEffect(() => {
     if (view !== "recurrence" || !data || recurrenceRecords.length) return;
     let cancelled = false;
     setRecurrenceLoading(true);
@@ -1285,7 +1303,7 @@ export default function Home() {
   const rotationEntry = rotationEntries[rotationPosition];
   const evolutionIndicator = filteredIndicators.find((item) => item.trend.length > 1) || chosen;
     const nav = [
-    ["overview", "Visão Geral", LayoutDashboard], ["backlog", "Portal de Pedidos", FileSpreadsheet], ["stores", "360° Por Loja", Store],
+    ["overview", "Visão Geral", LayoutDashboard], ["backlog", "Portal de Pedidos", FileSpreadsheet], ["receiving", "Recebimento", ClipboardList], ["stores", "360° Por Loja", Store],
     ["ranking", "Ranking", Trophy], ["performance", "Pedidos", CircleGauge], ["recurrence", "Recorrência", Users],
     ["quality", "Qualidade dos dados", Database], ["cadastro", "Usuários", Users], ["profile", "Meu perfil", UserCircle], ["settings", "Configurações", Settings], ["audit", "Auditoria", ClipboardList], ["history", "Histórico", History],
   ] as const;
@@ -1334,10 +1352,11 @@ export default function Home() {
         {error && <p className="error-text" role="alert">{error}</p>}
         {sourceWarning && <p className="error-text" role="status">{sourceWarning}</p>}
 
-        {view !== "history" && view !== "backlog" && <Filters data={data} store={store} setStore={setStore} cycle={cycle} setCycle={setCycle} startDate={startDate} setStartDate={setStartDate} endDate={endDate} setEndDate={setEndDate} indicator={indicatorFilter} setIndicator={setIndicatorFilter} status={statusFilter} setStatus={setStatusFilter} hideMetaStatus={hideMetaStatus} />}
+        {view !== "history" && view !== "backlog" && view !== "receiving" && <Filters data={data} store={store} setStore={setStore} cycle={cycle} setCycle={setCycle} startDate={startDate} setStartDate={setStartDate} endDate={endDate} setEndDate={setEndDate} indicator={indicatorFilter} setIndicator={setIndicatorFilter} status={statusFilter} setStatus={setStatusFilter} hideMetaStatus={hideMetaStatus} />}
 
         <div className="content">
-          {view === "backlog" && <BacklogPortal userId={currentUser.id} />}
+          {view === "backlog" && <BacklogPortal userId={currentUser.id} initialView={portalSection} />}
+          {view === "receiving" && <ReceivingView onUpdated={() => void load(false)} />}
           {authError && <p className="auth-message access-error" role="alert">{authError}</p>}
           {view === "overview" && <>
             <section className="page-head"><div><span className="eyebrow">Visão executiva</span><h1>Visão Geral da Operação</h1><p>{hideMetaStatus ? "Resultados consolidados das lojas no período selecionado." : "O que está saudável, onde agir e quais lojas exigem atenção."}</p></div><span className="data-chip">{filteredIndicators.reduce((sum, item) => sum + item.records.length, 0).toLocaleString("pt-BR")} registros no recorte</span></section>

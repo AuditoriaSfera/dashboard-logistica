@@ -3,6 +3,9 @@ import { authorize } from "../../../server/auth.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { databaseConfigured, getSql, loadDashboardFromDatabase } from "../../../server/db.mjs";
+import { applyReceivingRegisterToDashboard, listReceivingInvoices } from "../../../server/receiving.mjs";
+import { applyRetiradaOverdueEvents, listRetiradaOverdueEvents, recordNewlyOverdueOrders } from "../../../server/retirada-overdue.mjs";
+import { loadBacklog } from "../../../server/backlog.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -77,7 +80,14 @@ export async function GET(request: Request) {
   const access = await authorize(request);
   if (access.error) return access.error;
   try {
-    const { snapshot, source } = await readSnapshotPreferringDatabase();
+    const { snapshot: rawSnapshot, source } = await readSnapshotPreferringDatabase();
+    if (source !== "file-fallback") {
+      const backlog = await loadBacklog();
+      await recordNewlyOverdueOrders(backlog);
+    }
+    const withReceiving = source === "database" ? applyReceivingRegisterToDashboard(rawSnapshot, await listReceivingInvoices(getSql())) : rawSnapshot;
+    const overdueEvents = source === "file-fallback" ? [] : await listRetiradaOverdueEvents();
+    const snapshot = applyRetiradaOverdueEvents(withReceiving, overdueEvents);
     return NextResponse.json(scopeForUser(snapshot, access.user), { headers: { "x-data-source": source, "cache-control": "no-store" } });
   }
   catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Falha ao carregar os dados." }, { status: 503 }); }

@@ -6,6 +6,7 @@ type PortalInstance = { ready: Promise<void>; dispose: () => void };
 declare global {
   interface Window {
     SferaBacklogMount?: (root: ShadowRoot, xlsx: unknown, storagePrefix: string) => PortalInstance;
+    SferaBacklogView?: (name: string) => void;
     SferaArruamentoMount?: (root: ShadowRoot, xlsx: unknown, canImport: () => boolean) => void;
   }
 }
@@ -15,7 +16,7 @@ function loadPortalScript() {
   if (window.SferaBacklogMount) return Promise.resolve();
   if (!scriptReady) scriptReady = new Promise<void>((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "/backlog/portal.js?v=arruamento-11";
+    script.src = "/backlog/portal.js?v=arruamento-12";
     script.onload = () => resolve();
     script.onerror = () => { script.remove(); scriptReady = null; reject(new Error("Não foi possível carregar o portal de pedidos.")); };
     document.head.appendChild(script);
@@ -28,7 +29,7 @@ function loadArruamentoScript() {
   if (window.SferaArruamentoMount) return Promise.resolve();
   if (!arruamentoScriptReady) arruamentoScriptReady = new Promise<void>((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "/backlog/arruamento.js?v=4";
+    script.src = "/backlog/arruamento.js?v=5";
     script.onload = () => resolve();
     script.onerror = () => { script.remove(); arruamentoScriptReady = null; reject(new Error("Não foi possível carregar o módulo de Arruamento.")); };
     document.head.appendChild(script);
@@ -36,8 +37,10 @@ function loadArruamentoScript() {
   return arruamentoScriptReady;
 }
 
-export function BacklogPortal({ userId }: { userId: string }) {
+export function BacklogPortal({ userId, initialView = "orders" }: { userId: string; initialView?: string }) {
   const host = useRef<HTMLDivElement>(null);
+  const initialViewRef = useRef(initialView);
+  initialViewRef.current = initialView;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -62,6 +65,9 @@ export function BacklogPortal({ userId }: { userId: string }) {
         instance = window.SferaBacklogMount(root, xlsx, `sfera-portal-${userId}-`);
         window.SferaArruamentoMount?.(root, xlsx, () => (root.querySelector('[data-view="import"]') as HTMLElement | null)?.hidden === false);
         await instance.ready;
+        // A navegação do Dashboard pode acontecer enquanto os scripts do Portal
+        // ainda estão carregando. Reaplique a seção escolhida depois da montagem.
+        if (!cancelled && initialViewRef.current !== "orders") window.SferaBacklogView?.(initialViewRef.current);
         if (!cancelled) setLoading(false);
       } catch (caught) {
         if (!cancelled) { setError(caught instanceof Error ? caught.message : "Falha ao abrir o portal."); setLoading(false); }
