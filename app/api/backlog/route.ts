@@ -1,11 +1,17 @@
 import { NextResponse } from 'next/server';
 import { authorize } from '../../../server/auth.mjs';
 import { loadBacklog, saveBacklog, scopeBacklog, storeDirectory } from '../../../server/backlog.mjs';
-import { recordNewlyOverdueOrders } from '../../../server/retirada-overdue.mjs';
+import { listRetiradaOverdueEvents, recordNewlyOverdueOrders } from '../../../server/retirada-overdue.mjs';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 const headers = {'Cache-Control':'no-store, private',Vary:'Cookie'};
+const normalizeStore = (value: unknown) => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');
+function scopeOverdueEvents(events: any[], user: { accountType: string; stores: string[] }) {
+  if (user.accountType === 'admin') return events;
+  const allowed = new Set((user.stores || []).map(normalizeStore));
+  return events.filter((event) => allowed.has(normalizeStore(event.store)) || allowed.has(normalizeStore(`${event.storeCode} ${event.store}`)));
+}
 
 export async function GET(request: Request) {
   const access = await authorize(request);
@@ -13,7 +19,8 @@ export async function GET(request: Request) {
   try {
     const base = await loadBacklog();
     await recordNewlyOverdueOrders(base);
-    return NextResponse.json(scopeBacklog(base,access.user,await storeDirectory()),{headers});
+    const [directory, overdueEvents] = await Promise.all([storeDirectory(), listRetiradaOverdueEvents()]);
+    return NextResponse.json({ ...scopeBacklog(base,access.user,directory), overdueEvents: scopeOverdueEvents(overdueEvents,access.user) },{headers});
   } catch { return NextResponse.json({error:'Não foi possível consultar a base compartilhada. Tente novamente.'},{status:503,headers}); }
 }
 
@@ -34,6 +41,7 @@ export async function POST(request: Request) {
   try {
     const base = await saveBacklog(input);
     await recordNewlyOverdueOrders(base);
-    return NextResponse.json(scopeBacklog(base,access.user,await storeDirectory()),{headers});
+    const [directory, overdueEvents] = await Promise.all([storeDirectory(), listRetiradaOverdueEvents()]);
+    return NextResponse.json({ ...scopeBacklog(base,access.user,directory), overdueEvents: scopeOverdueEvents(overdueEvents,access.user) },{headers});
   } catch (error) { return NextResponse.json({error:error instanceof Error && /pedidos|base válida/.test(error.message)?error.message:'Não foi possível salvar a importação. A base anterior foi preservada.'},{status:503,headers}); }
 }

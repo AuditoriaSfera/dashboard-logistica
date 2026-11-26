@@ -22,10 +22,23 @@ async function contextFor(user: { accountType: string; stores: string[] }) {
 }
 
 function sameOrigin(request: Request) {
-  if (request.headers.get("sec-fetch-site") === "cross-site") return false;
   const origin = request.headers.get("origin");
-  if (!origin) return true;
-  try { return new URL(origin).origin === new URL(request.url).origin; } catch { return false; }
+  const url = new URL(request.url);
+  const allowed = new Set([url.origin]);
+  // Railway terminates TLS before forwarding HTTP to the app process.
+  if (request.headers.get("x-forwarded-proto") === "https") allowed.add(`https://${url.host}`);
+  if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+    try {
+      const publicUrl = /^https?:\/\//i.test(process.env.RAILWAY_PUBLIC_DOMAIN)
+        ? process.env.RAILWAY_PUBLIC_DOMAIN
+        : `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+      allowed.add(new URL(publicUrl).origin);
+    } catch { /* Invalid platform values do not grant an origin. */ }
+  }
+  if (process.env.ACCESS_APP_ORIGIN) {
+    try { allowed.add(new URL(process.env.ACCESS_APP_ORIGIN).origin); } catch { /* Invalid configuration grants no origin. */ }
+  }
+  return Boolean(origin && allowed.has(origin) && request.headers.get("sec-fetch-site") !== "cross-site");
 }
 
 export async function GET(request: Request) {
