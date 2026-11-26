@@ -165,13 +165,19 @@ export function applyRetiradaOverdueEvents(snapshot, events) {
     const date = String(row.date || row.periodEnd || row.periodStart || "").slice(0, 10);
     return !/^\d{4}-\d{2}-\d{2}$/.test(date) || date < RETIRADA_OVERDUE_CUTOVER;
   });
-  const appended = events.filter((event) => event.overdueDate >= RETIRADA_OVERDUE_CUTOVER).map((event) => ({
+  const countedDays = new Set();
+  const appended = events.filter((event) => event.overdueDate >= RETIRADA_OVERDUE_CUTOVER).map((event) => {
+    const dayKey = `${event.storeCode}|${event.cycle ?? "sem-ciclo"}|${event.overdueDate}`;
+    const firstOrderOfDay = !countedDays.has(dayKey);
+    countedDays.add(dayKey);
+    return {
     indicator: "retirada", storeCode: event.storeCode, store: event.store, cycle: event.cycle,
     sourceRow: null, date: `${event.overdueDate}T12:00:00.000Z`, periodStart: `${event.overdueDate}T12:00:00.000Z`, periodEnd: `${event.overdueDate}T12:00:00.000Z`,
-    value: 1, target: null, volume: 1, statusSource: "Pedido em atraso",
+    value: firstOrderOfDay ? 1 : 0, target: null, volume: 1, statusSource: "Pedido em atraso",
     notes: event.orderCode,
     raw: { overdueOrderCode: event.orderCode, captureDate: event.captureDate, overdueDate: event.overdueDate, deliveryType: event.deliveryType, captureTime: event.captureTime, source: "backlog-overdue" },
-  }));
+  };
+  });
   const records = [...historical, ...appended];
   const hasCaratingaEvent = appended.some((event) => normalize(event.store) === "caratinga");
   const stores = (snapshot.stores || []).map((store) => hasCaratingaEvent && normalize(store.store) === "caratinga" ? { ...store, storeCode: "25915" } : store);

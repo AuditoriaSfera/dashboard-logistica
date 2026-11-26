@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { eventFromRow, filterRetiradaOverdueEvents, isRetiradaDeliveryType } from '../server/retirada-overdue.mjs';
+import { applyRetiradaOverdueEvents, eventFromRow, filterRetiradaOverdueEvents, isRetiradaDeliveryType } from '../server/retirada-overdue.mjs';
 
 test('Retirada contabilizada inclui somente pedidos de retirada na Central', () => {
   assert.equal(isRetiradaDeliveryType('Retirada na Central'), true);
@@ -24,4 +24,17 @@ test('Retirada contabilizada normaliza datas retornadas pelo PostgreSQL', () => 
   });
   assert.equal(event.captureDate, '2026-11-20');
   assert.equal(event.overdueDate, '2026-11-26');
+});
+
+test('Retirada conta uma unidade de resultado por loja, ciclo e dia, mas preserva cada pedido', () => {
+  const snapshot = { stores: [], filters: { stores: [] }, indicators: { retirada: { records: [] } } };
+  const events = Array.from({ length: 71 }, (_, index) => ({
+    storeCode: '21470', store: 'Benfica', orderCode: `P-${index + 1}`, cycle: 16,
+    captureDate: '2026-11-22', overdueDate: '2026-11-26', deliveryType: 'Retirada na Central',
+  }));
+  const result = applyRetiradaOverdueEvents(snapshot, events);
+  const records = result.indicators.retirada.records;
+  assert.equal(records.length, 71);
+  assert.equal(records.filter((row) => row.notes).length, 71);
+  assert.equal(records.reduce((sum, row) => sum + row.value, 0), 1);
 });
