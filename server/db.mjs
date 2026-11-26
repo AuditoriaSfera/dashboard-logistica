@@ -214,11 +214,12 @@ export async function saveArruamentoPortalSource(sql, { store, storeCode, year, 
   const storeKey = arruamentoStoreKey(store);
   if (!storeKey) throw new Error("Informe a loja da planilha de arruamento.");
   await sql.begin(async (tx) => {
-    await tx`insert into public.arruamento_portal_workbooks (store_key, store, store_code, year, cycle, source_type, file_name, content)
+    const changed = await tx`insert into public.arruamento_portal_workbooks (store_key, store, store_code, year, cycle, source_type, file_name, content)
       values (${storeKey}, ${store}, ${storeCode}, ${Number(year) || 2026}, ${Number(cycle)}, ${sourceType}, ${fileName}, ${bytes})
       on conflict (store_key, year, cycle, source_type) do update set store = excluded.store, store_code = excluded.store_code,
-        file_name = excluded.file_name, content = excluded.content, updated_at = now()`;
-    await tx`insert into public.arruamento_portal_import_history (store_key, store, store_code, year, cycle, source_type, file_name, bytes)
+        file_name = excluded.file_name, content = excluded.content, updated_at = now()
+      where public.arruamento_portal_workbooks.content is distinct from excluded.content returning source_type`;
+    if (changed.length) await tx`insert into public.arruamento_portal_import_history (store_key, store, store_code, year, cycle, source_type, file_name, bytes)
       values (${storeKey}, ${store}, ${storeCode}, ${Number(year) || 2026}, ${Number(cycle)}, ${sourceType}, ${fileName}, ${bytes.length})`;
   });
 }
@@ -238,7 +239,8 @@ export async function saveArruamentoPortalSnapshot(sql, snapshot) {
   await sql`insert into public.arruamento_portal_snapshots (store_key, store, store_code, year, cycle, snapshot)
     values (${storeKey}, ${snapshot.store}, ${storeCode}, ${Number(snapshot.year)}, ${Number(snapshot.cycle)}, ${JSON.stringify(snapshot)}::jsonb)
     on conflict (store_key, year, cycle) do update set store = excluded.store, store_code = excluded.store_code,
-      snapshot = excluded.snapshot, updated_at = now()`;
+      snapshot = excluded.snapshot, updated_at = now()
+    where public.arruamento_portal_snapshots.snapshot is distinct from excluded.snapshot`;
 }
 
 export async function listArruamentoPortalSnapshots(sql, stores, admin = false) {
