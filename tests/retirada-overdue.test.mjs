@@ -8,11 +8,12 @@ test('Retirada contabilizada inclui somente pedidos de retirada na Central', () 
   assert.equal(isRetiradaDeliveryType('No endereço de entrega'), false);
 
   const events = [
-    { orderCode: 'R-1', deliveryType: 'Retirada na Central' },
-    { orderCode: 'E-1', deliveryType: 'No endereço de entrega' },
-    { orderCode: 'R-2', deliveryType: 'Retirar na Central de Serviços' },
+    { orderCode: 'R-1', storeCode: '21470', captureDate: '2026-11-22', deliveryType: 'Retirada na Central' },
+    { orderCode: 'E-1', storeCode: '21470', captureDate: '2026-11-22', deliveryType: 'No endereço de entrega' },
+    { orderCode: 'R-2', storeCode: '21470', captureDate: '2026-11-20', deliveryType: 'Retirar na Central de Serviços' },
+    { orderCode: 'R-old', storeCode: '21470', captureDate: '2026-11-18', deliveryType: 'Retirada na Central' },
   ];
-  assert.deepEqual(filterRetiradaOverdueEvents(events).map((event) => event.orderCode), ['R-1', 'R-2']);
+  assert.deepEqual(filterRetiradaOverdueEvents(events, '2026-11-26').map((event) => event.orderCode), ['R-1', 'R-2']);
 });
 
 test('Retirada contabilizada normaliza datas retornadas pelo PostgreSQL', () => {

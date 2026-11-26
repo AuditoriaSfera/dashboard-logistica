@@ -16,7 +16,6 @@ const storeNames = {
 const storeState = (code) => ["19826", "20740", "21044", "21483"].includes(String(code)) ? "RJ" : "MG";
 const pickupTypes = new Set(["retiradanacentral", "retirarnacentral", "retiradanacentraldeservicos", "retirarnacentraldeservicos"]);
 export function isRetiradaDeliveryType(value) { return pickupTypes.has(normalize(value)); }
-export function filterRetiradaOverdueEvents(events) { return events.filter((event) => isRetiradaDeliveryType(event.deliveryType)); }
 const isoToday = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 const shiftDay = (iso, amount) => { const date = new Date(`${iso}T12:00:00Z`); date.setUTCDate(date.getUTCDate() + amount); return date.toISOString().slice(0, 10); };
 
@@ -52,6 +51,13 @@ function firstOverdueDate(captureDate, code) {
   }
   return null;
 }
+export function filterRetiradaOverdueEvents(events, asOf = isoToday()) {
+  return events.filter((event) => {
+    if (!isRetiradaDeliveryType(event.deliveryType)) return false;
+    const overdueDate = firstOverdueDate(String(event.captureDate || "").slice(0, 10), event.storeCode);
+    return overdueDate != null && overdueDate >= RETIRADA_OVERDUE_CUTOVER && overdueDate <= asOf;
+  });
+}
 function cycleNumber(value) {
   const match = String(value ?? "").match(/\d+/);
   return match ? Number(match[0]) : null;
@@ -68,11 +74,11 @@ function overdueCandidates(base, asOf) {
     if (!rawCode || !String(row.id || "").trim()) continue;
     const storeCode = codeAliases[rawCode] || rawCode;
     const dueDate = firstOverdueDate(row.date, rawCode);
-    if (!dueDate || dueDate > asOf) continue;
+    if (!dueDate || dueDate < RETIRADA_OVERDUE_CUTOVER || dueDate > asOf) continue;
     result.push({
       id: randomUUID(), storeCode, store: storeNames[rawCode] || storeNames[storeCode] || String(row.channel).split(/\s*[-–—]\s*/).slice(1).join(" - ").trim() || storeCode,
       orderCode: String(row.id).trim(), cycle: cycleNumber(row.cycle), captureDate: row.date,
-      overdueDate: dueDate < RETIRADA_OVERDUE_CUTOVER ? RETIRADA_OVERDUE_CUTOVER : dueDate,
+      overdueDate: dueDate,
       deliveryType: String(row.delivery || ""), captureTime: String(row.time || "").trim() || null,
     });
   }
