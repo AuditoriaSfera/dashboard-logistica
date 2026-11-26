@@ -15,6 +15,8 @@ const storeNames = {
 };
 const storeState = (code) => ["19826", "20740", "21044", "21483"].includes(String(code)) ? "RJ" : "MG";
 const pickupTypes = new Set(["retiradanacentral", "retirarnacentral", "retiradanacentraldeservicos", "retirarnacentraldeservicos"]);
+export function isRetiradaDeliveryType(value) { return pickupTypes.has(normalize(value)); }
+export function filterRetiradaOverdueEvents(events) { return events.filter((event) => isRetiradaDeliveryType(event.deliveryType)); }
 const isoToday = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 const shiftDay = (iso, amount) => { const date = new Date(`${iso}T12:00:00Z`); date.setUTCDate(date.getUTCDate() + amount); return date.toISOString().slice(0, 10); };
 
@@ -61,8 +63,7 @@ function overdueCandidates(base, asOf) {
     const fiscal = normalize(row.fiscal);
     if (!new Set(["naofaturado", "dispfaturamento"]).has(fiscal) || normalize(row.status).includes("cancel")) continue;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(row.date || "")) || row.date >= asOf) continue;
-    const delivery = normalize(row.delivery);
-    if (!pickupTypes.has(delivery) && delivery !== "noenderecodeentrega") continue;
+    if (!isRetiradaDeliveryType(row.delivery)) continue;
     const rawCode = channelCode(row.channel);
     if (!rawCode || !String(row.id || "").trim()) continue;
     const storeCode = codeAliases[rawCode] || rawCode;
@@ -136,10 +137,10 @@ export async function recordNewlyOverdueOrders(base) {
 }
 
 export async function listRetiradaOverdueEvents() {
-  if (!databaseConfigured()) return readFileEvents();
+  if (!databaseConfigured()) return filterRetiradaOverdueEvents(await readFileEvents());
   const sql = getSql(); await ensureSchema(sql);
   const rows = await sql`select * from public.retirada_overdue_events where overdue_date >= ${RETIRADA_OVERDUE_CUTOVER}::date order by overdue_date, store_name, order_code`;
-  return rows.map(eventFromRow);
+  return filterRetiradaOverdueEvents(rows.map(eventFromRow));
 }
 
 export function applyRetiradaOverdueEvents(snapshot, events) {
