@@ -84,11 +84,20 @@ const eventsFile = () => path.join(dataDirectory(), "retirada-overdue-events.jso
 let fileWrite = Promise.resolve();
 let lastCapturedKey = "";
 
-function eventFromRow(row) {
+function dateOnly(value) {
+  if (value instanceof Date && Number.isFinite(value.getTime())) return value.toISOString().slice(0, 10);
+  const input = String(value ?? "").trim();
+  const isoDate = input.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
+  if (isoDate) return isoDate;
+  const parsed = new Date(input);
+  return Number.isFinite(parsed.getTime()) ? parsed.toISOString().slice(0, 10) : input.slice(0, 10);
+}
+
+export function eventFromRow(row) {
   return {
     id: row.id, storeCode: row.store_code, store: row.store_name, orderCode: row.order_code,
-    cycle: row.cycle == null ? null : Number(row.cycle), captureDate: String(row.capture_date).slice(0, 10),
-    overdueDate: String(row.overdue_date).slice(0, 10), deliveryType: row.delivery_type,
+    cycle: row.cycle == null ? null : Number(row.cycle), captureDate: dateOnly(row.capture_date),
+    overdueDate: dateOnly(row.overdue_date), deliveryType: row.delivery_type,
     captureTime: row.capture_time || null,
   };
 }
