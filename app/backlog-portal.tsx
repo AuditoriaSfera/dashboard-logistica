@@ -8,6 +8,7 @@ declare global {
     SferaBacklogMount?: (root: ShadowRoot, xlsx: unknown, storagePrefix: string) => PortalInstance;
     SferaBacklogView?: (name: string) => void;
     SferaArruamentoMount?: (root: ShadowRoot, xlsx: unknown, canImport: () => boolean) => void;
+    SferaSupervisorMessagesMount?: (root: ShadowRoot) => void;
   }
 }
 
@@ -16,7 +17,7 @@ function loadPortalScript() {
   if (window.SferaBacklogMount) return Promise.resolve();
   if (!scriptReady) scriptReady = new Promise<void>((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "/backlog/portal.js?v=atrasos-so-lojas-20";
+    script.src = "/backlog/portal.js?v=mensagens-supervisores-1";
     script.onload = () => resolve();
     script.onerror = () => { script.remove(); scriptReady = null; reject(new Error("Não foi possível carregar o portal de pedidos.")); };
     document.head.appendChild(script);
@@ -37,6 +38,19 @@ function loadArruamentoScript() {
   return arruamentoScriptReady;
 }
 
+let supervisorMessagesScriptReady: Promise<void> | null = null;
+function loadSupervisorMessagesScript() {
+  if (window.SferaSupervisorMessagesMount) return Promise.resolve();
+  if (!supervisorMessagesScriptReady) supervisorMessagesScriptReady = new Promise<void>((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "/backlog/supervisor-messages.js?v=1";
+    script.onload = () => resolve();
+    script.onerror = () => { script.remove(); supervisorMessagesScriptReady = null; reject(new Error("Não foi possível carregar as mensagens para supervisores.")); };
+    document.head.appendChild(script);
+  });
+  return supervisorMessagesScriptReady;
+}
+
 export function BacklogPortal({ userId, initialView = "orders", xlsx }: { userId: string; initialView?: string; xlsx: unknown }) {
   const host = useRef<HTMLDivElement>(null);
   const initialViewRef = useRef(initialView);
@@ -51,12 +65,12 @@ export function BacklogPortal({ userId, initialView = "orders", xlsx }: { userId
     const load = async () => {
       try {
         const [markup, styles] = await Promise.all([
-          fetch("/backlog/interface.html?v=shared-10", { signal: controller.signal }).then((response) => { if (!response.ok) throw new Error("Falha ao carregar a interface."); return response.text(); }),
+          fetch("/backlog/interface.html?v=shared-11", { signal: controller.signal }).then((response) => { if (!response.ok) throw new Error("Falha ao carregar a interface."); return response.text(); }),
           Promise.all([
-            fetch("/backlog/style.css?v=shared-10", { signal: controller.signal }).then((response) => { if (!response.ok) throw new Error("Falha ao carregar o visual."); return response.text(); }),
-            fetch("/backlog/counted.css?v=shared-10", { signal: controller.signal }).then((response) => { if (!response.ok) throw new Error("Falha ao carregar os estilos de Retirada."); return response.text(); }),
+            fetch("/backlog/style.css?v=shared-11", { signal: controller.signal }).then((response) => { if (!response.ok) throw new Error("Falha ao carregar o visual."); return response.text(); }),
+            fetch("/backlog/counted.css?v=shared-11", { signal: controller.signal }).then((response) => { if (!response.ok) throw new Error("Falha ao carregar os estilos de Retirada."); return response.text(); }),
           ]).then(([baseStyles, countedStyles]) => `${baseStyles}\n${countedStyles}`),
-          loadPortalScript(), loadArruamentoScript(),
+          loadPortalScript(), loadArruamentoScript(), loadSupervisorMessagesScript(),
         ]);
         if (cancelled) return;
         root.innerHTML = "";
@@ -64,6 +78,7 @@ export function BacklogPortal({ userId, initialView = "orders", xlsx }: { userId
         root.appendChild(style);
         const template = document.createElement("template"); template.innerHTML = markup;
         root.appendChild(template.content.cloneNode(true));
+        window.SferaSupervisorMessagesMount?.(root);
         if (!window.SferaBacklogMount) throw new Error("Portal indisponível. Recarregue a página.");
         instance = window.SferaBacklogMount(root, xlsx, `sfera-portal-${userId}-`);
         window.SferaArruamentoMount?.(root, xlsx, () => (root.querySelector('[data-view="import"]') as HTMLElement | null)?.hidden === false);
