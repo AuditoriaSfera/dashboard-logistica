@@ -17,7 +17,7 @@ function loadPortalScript() {
   if (window.SferaBacklogMount) return Promise.resolve();
   if (!scriptReady) scriptReady = new Promise<void>((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "/backlog/portal.js?v=mensagens-supervisores-1";
+    script.src = "/backlog/portal.js?v=mensagens-supervisores-2";
     script.onload = () => resolve();
     script.onerror = () => { script.remove(); scriptReady = null; reject(new Error("Não foi possível carregar o portal de pedidos.")); };
     document.head.appendChild(script);
@@ -43,7 +43,7 @@ function loadSupervisorMessagesScript() {
   if (window.SferaSupervisorMessagesMount) return Promise.resolve();
   if (!supervisorMessagesScriptReady) supervisorMessagesScriptReady = new Promise<void>((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "/backlog/supervisor-messages.js?v=1";
+    script.src = "/backlog/supervisor-messages.js?v=2";
     script.onload = () => resolve();
     script.onerror = () => { script.remove(); supervisorMessagesScriptReady = null; reject(new Error("Não foi possível carregar as mensagens para supervisores.")); };
     document.head.appendChild(script);

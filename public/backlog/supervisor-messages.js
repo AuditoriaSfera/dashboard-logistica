@@ -1,6 +1,6 @@
 (function () {
   let root = null;
-  let state = { canImport: false, base: { rows: [], stores: {} }, directory: {} };
+  let state = { canImport: false, orderType: "address", base: { rows: [], stores: {} }, directory: {} };
   let contacts = {};
   let contactsLoaded = false;
   let contactsLoading = false;
@@ -143,11 +143,15 @@
     const supervisor = $("#supervisorName")?.value.trim() || "";
     const stores = region ? backlogByStore(region) : [];
     const total = stores.reduce((sum, store) => sum + store.total, 0);
+    const modality = state.orderType === "address" ? "entrega" : state.orderType === "pickup" ? "retirada" : "";
+    const importedAt = state.base.importsByType?.[state.orderType]?.importedAt || state.base.importedAt;
+    const importedDate = importedAt ? new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", dateStyle: "short" }).format(new Date(importedAt)) : "";
+    const importedTime = importedAt ? new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" }).format(new Date(importedAt)) : "";
     $("#supervisorSummary").textContent = region
       ? `${stores.length} loja(s) na regional · ${total} pedido(s) em aberto na última base importada.`
       : "Selecione uma regional para visualizar o backlog.";
-    $("#supervisorMessage").value = region && supervisor
-      ? `Olá, ${supervisor}. Segue a situação do backlog das lojas da ${region}, atualizada em ${state.base.importedAt ? brazilTime(state.base.importedAt) : "data da última importação"}.`
+    $("#supervisorMessage").value = region && supervisor && importedAt
+      ? `Backlog dos pedidos${modality ? ` de ${modality}` : ""} do dia ${importedDate} às ${importedTime}.`
       : "";
     $("#supervisorImageTitle").textContent = region ? `Backlog · ${region} · ${stores.length} lojas` : "Situação do backlog";
     if (region) drawImage(region, supervisor || "Supervisor(a)", stores);
