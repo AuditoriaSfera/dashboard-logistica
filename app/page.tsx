@@ -1354,7 +1354,7 @@ export default function Home() {
         {view !== "history" && view !== "backlog" && view !== "receiving" && <Filters data={data} store={store} setStore={setStore} cycle={cycle} setCycle={setCycle} startDate={startDate} setStartDate={setStartDate} endDate={endDate} setEndDate={setEndDate} indicator={indicatorFilter} setIndicator={setIndicatorFilter} status={statusFilter} setStatus={setStatusFilter} hideMetaStatus={hideMetaStatus} />}
 
         <div className="content">
-          {view === "backlog" && <BacklogPortal userId={currentUser.id} initialView={portalSection} />}
+          {view === "backlog" && <BacklogPortal userId={currentUser.id} initialView={portalSection} xlsx={XLSX} />}
           {view === "receiving" && <ReceivingView onUpdated={() => void load(false)} />}
           {authError && <p className="auth-message access-error" role="alert">{authError}</p>}
           {view === "overview" && <>

@@ -16,7 +16,7 @@ function loadPortalScript() {
   if (window.SferaBacklogMount) return Promise.resolve();
   if (!scriptReady) scriptReady = new Promise<void>((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "/backlog/portal.js?v=resumo-importacao-16";
+    script.src = "/backlog/portal.js?v=stable-xlsx-17";
     script.onload = () => resolve();
     script.onerror = () => { script.remove(); scriptReady = null; reject(new Error("Não foi possível carregar o portal de pedidos.")); };
     document.head.appendChild(script);
@@ -37,7 +37,7 @@ function loadArruamentoScript() {
   return arruamentoScriptReady;
 }
 
-export function BacklogPortal({ userId, initialView = "orders" }: { userId: string; initialView?: string }) {
+export function BacklogPortal({ userId, initialView = "orders", xlsx }: { userId: string; initialView?: string; xlsx: unknown }) {
   const host = useRef<HTMLDivElement>(null);
   const initialViewRef = useRef(initialView);
   initialViewRef.current = initialView;
@@ -50,13 +50,13 @@ export function BacklogPortal({ userId, initialView = "orders" }: { userId: stri
     const controller = new AbortController();
     const load = async () => {
       try {
-        const [markup, styles, xlsx] = await Promise.all([
+        const [markup, styles] = await Promise.all([
           fetch("/backlog/interface.html?v=shared-10", { signal: controller.signal }).then((response) => { if (!response.ok) throw new Error("Falha ao carregar a interface."); return response.text(); }),
           Promise.all([
             fetch("/backlog/style.css?v=shared-10", { signal: controller.signal }).then((response) => { if (!response.ok) throw new Error("Falha ao carregar o visual."); return response.text(); }),
             fetch("/backlog/counted.css?v=shared-10", { signal: controller.signal }).then((response) => { if (!response.ok) throw new Error("Falha ao carregar os estilos de Retirada."); return response.text(); }),
           ]).then(([baseStyles, countedStyles]) => `${baseStyles}\n${countedStyles}`),
-          import("xlsx"), loadPortalScript(), loadArruamentoScript(),
+          loadPortalScript(), loadArruamentoScript(),
         ]);
         if (cancelled) return;
         root.innerHTML = "";
