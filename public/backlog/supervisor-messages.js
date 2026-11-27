@@ -7,6 +7,11 @@
 
   const $ = (selector) => root?.querySelector(selector);
   const regions = ["Regional Regilane", "Regional Guilherme", "Regional Luanna"];
+  const coordinators = {
+    "Regional Regilane": "Regilane",
+    "Regional Guilherme": "Guilherme",
+    "Regional Luanna": "Luanna",
+  };
   const brazilTime = (value, withTime = true) => new Intl.DateTimeFormat("pt-BR", {
     timeZone: "America/Sao_Paulo", dateStyle: "short", ...(withTime ? { timeStyle: "short" } : {}),
   }).format(value ? new Date(value) : new Date());
@@ -34,15 +39,13 @@
     }
   }
 
-  function supervisorFromDirectory(region) {
-    const names = [...new Set(Object.values(state.directory || {}).filter((store) => store.regional === region && store.supervisor)
-      .map((store) => String(store.supervisor).trim()).filter(Boolean))];
-    return names.length === 1 ? names[0] : "";
+  function coordinatorForRegion(region) {
+    return coordinators[region] || "";
   }
 
   function fillContact(region) {
     const saved = contacts[region];
-    $("#supervisorName").value = saved?.supervisorName || supervisorFromDirectory(region);
+    $("#supervisorName").value = saved?.supervisorName || coordinatorForRegion(region);
     $("#supervisorPhone").value = saved?.phone || "";
     $("#supervisorContactStatus").textContent = saved
       ? `Contato salvo · ${brazilTime(saved.updatedAt)}`
@@ -96,7 +99,7 @@
     context.fillText("Situação do backlog por loja", 38, 88);
     context.font = "17px Segoe UI, Arial";
     context.fillStyle = "#d2e2ed";
-    context.fillText(`${region} · Supervisor(a): ${supervisor}`, 38, 126, 1400);
+    context.fillText(`${region} · Coordenador(a) regional: ${supervisor}`, 38, 126, 1400);
     const importedAt = state.base.importedAt ? brazilTime(state.base.importedAt) : "Sem importação registrada";
     const total = stores.reduce((sum, store) => sum + store.total, 0);
     context.fillText(`Base atualizada em ${importedAt} · ${stores.length} lojas · ${total} pedidos em aberto`, 38, 151, 1400);

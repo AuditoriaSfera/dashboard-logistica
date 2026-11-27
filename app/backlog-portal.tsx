@@ -43,7 +43,7 @@ function loadSupervisorMessagesScript() {
   if (window.SferaSupervisorMessagesMount) return Promise.resolve();
   if (!supervisorMessagesScriptReady) supervisorMessagesScriptReady = new Promise<void>((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "/backlog/supervisor-messages.js?v=2";
+    script.src = "/backlog/supervisor-messages.js?v=3";
     script.onload = () => resolve();
     script.onerror = () => { script.remove(); supervisorMessagesScriptReady = null; reject(new Error("Não foi possível carregar as mensagens para supervisores.")); };
     document.head.appendChild(script);
@@ -65,7 +65,7 @@ export function BacklogPortal({ userId, initialView = "orders", xlsx }: { userId
     const load = async () => {
       try {
         const [markup, styles] = await Promise.all([
-          fetch("/backlog/interface.html?v=shared-11", { signal: controller.signal }).then((response) => { if (!response.ok) throw new Error("Falha ao carregar a interface."); return response.text(); }),
+          fetch("/backlog/interface.html?v=shared-12", { signal: controller.signal }).then((response) => { if (!response.ok) throw new Error("Falha ao carregar a interface."); return response.text(); }),
           Promise.all([
             fetch("/backlog/style.css?v=shared-11", { signal: controller.signal }).then((response) => { if (!response.ok) throw new Error("Falha ao carregar o visual."); return response.text(); }),
             fetch("/backlog/counted.css?v=shared-11", { signal: controller.signal }).then((response) => { if (!response.ok) throw new Error("Falha ao carregar os estilos de Retirada."); return response.text(); }),
