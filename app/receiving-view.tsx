@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ClipboardList, FileSpreadsheet, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
 import * as XLSX from "xlsx";
+import { findReceivingColumns, normalizeReceivingHeader } from "./receiving-import.mjs";
 
 type StoreOption = { storeCode: string; store: string };
 type Invoice = {
@@ -12,7 +13,6 @@ type Invoice = {
 };
 type Props = { onUpdated: () => void };
 const today = () => { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`; };
-const normalizeHeader = (value: unknown) => String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
 const normalizeInvoice = (value: unknown) => String(value ?? "").trim().replace(/\D/g, "").replace(/^0+(?=\d)/, "");
 function parseDate(value: unknown): string | null {
   if (value instanceof Date && Number.isFinite(value.getTime())) return value.toISOString().slice(0, 10);
@@ -25,16 +25,6 @@ function parseDate(value: unknown): string | null {
   if (br) return `${br[3]}-${br[2].padStart(2, "0")}-${br[1].padStart(2, "0")}`;
   const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
   return iso ? `${iso[1]}-${iso[2]}-${iso[3]}` : null;
-}
-function findColumns(rows: unknown[][]) {
-  for (let index = 0; index < Math.min(rows.length, 40); index += 1) {
-    const values = rows[index].map(normalizeHeader);
-    const invoice = values.findIndex((value) => value === "nf" || value.includes("numerodanotafiscal") || value.includes("notafiscal") || value.includes("numeronf"));
-    const entry = values.findIndex((value) => value.includes("dataentrada") || value.includes("entrada") && value.includes("data"));
-    const store = values.findIndex((value) => value === "loja" || value.includes("codigoloja") || value.includes("storecode"));
-    if (invoice >= 0 && entry >= 0) return { headerRow: index, invoice, entry, store };
-  }
-  return null;
 }
 const brDate = (value: string | null) => value ? new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeZone: "UTC" }).format(new Date(`${value}T12:00:00Z`)) : "—";
 
@@ -93,13 +83,13 @@ export function ReceivingView({ onUpdated }: Props) {
       let parsed: Array<{ invoiceNumber: string; storeCode: string; entryDate: string }> = [];
       for (const sheet of workbook.SheetNames) {
         const matrix = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[sheet], { header: 1, raw: true, defval: "" });
-        const columns = findColumns(matrix);
+        const columns = findReceivingColumns(matrix);
         if (!columns) continue;
         const imported = matrix.slice(columns.headerRow + 1).flatMap((line) => {
           const invoiceNumber = String(line[columns.invoice] ?? "").trim();
           const entryDate = parseDate(line[columns.entry]);
           const rawStore = columns.store >= 0 ? String(line[columns.store] ?? "").trim() : "";
-          const matchedStores = rawStore ? stores.filter((item) => item.storeCode === rawStore || normalizeHeader(item.store) === normalizeHeader(rawStore) || normalizeHeader(`${item.storeCode}${item.store}`) === normalizeHeader(rawStore)) : (storeCode ? stores.filter((item) => item.storeCode === storeCode) : stores.filter((item) => invoices.some((invoice) => normalizeInvoice(invoice.invoiceNumber) === normalizeInvoice(invoiceNumber) && invoice.storeCode === item.storeCode)));
+          const matchedStores = rawStore ? stores.filter((item) => item.storeCode === rawStore || normalizeReceivingHeader(item.store) === normalizeReceivingHeader(rawStore) || normalizeReceivingHeader(`${item.storeCode}${item.store}`) === normalizeReceivingHeader(rawStore)) : (storeCode ? stores.filter((item) => item.storeCode === storeCode) : stores.filter((item) => invoices.some((invoice) => normalizeInvoice(invoice.invoiceNumber) === normalizeInvoice(invoiceNumber) && invoice.storeCode === item.storeCode)));
           if (!invoiceNumber || !entryDate || matchedStores.length !== 1) return [];
           return [{ invoiceNumber, storeCode: matchedStores[0].storeCode, entryDate }];
         });
