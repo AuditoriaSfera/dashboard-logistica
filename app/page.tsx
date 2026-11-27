@@ -1368,7 +1368,7 @@ export default function Home() {
             <section className="two-col">
               <article className="panel"><div className="section-title"><div><h2>{evolutionIndicator ? (isWithdrawal(evolutionIndicator.id) ? evolutionIndicator.label : trendTitle(evolutionIndicator)) : "Evolução do indicador"}</h2><p>{evolutionIndicator ? `Valores exibidos em ${trendUnit(evolutionIndicator.id)}.` : "Selecione um indicador"}</p></div></div>{evolutionIndicator && (isWithdrawal(evolutionIndicator.id) ? <Ranking indicator={evolutionIndicator} onStore={openStore} hideMetaStatus={hideMetaStatus} showPlacement /> : <Trend indicator={evolutionIndicator} selectedCycle={cycle} hideMetaStatus={hideMetaStatus} />)}</article>
             </section>
-            <section className="panel"><div className="section-title"><div><h2>Mapa de performance</h2><p>Clique em uma loja para abrir a visão 360°.</p></div></div><Matrix data={presentationData || workingData} onStore={openStore} hideMetaStatus={hideMetaStatus} /></section>
+            {currentUser.accountType === "admin" && <section className="panel"><div className="section-title"><div><h2>Mapa de performance</h2><p>Clique em uma loja para abrir a visão 360°.</p></div></div><Matrix data={presentationData || workingData} onStore={openStore} hideMetaStatus={hideMetaStatus} /></section>}
           </>}
 
           {view === "indicator" && chosen && <>
