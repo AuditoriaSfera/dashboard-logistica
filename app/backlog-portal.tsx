@@ -16,7 +16,7 @@ function loadPortalScript() {
   if (window.SferaBacklogMount) return Promise.resolve();
   if (!scriptReady) scriptReady = new Promise<void>((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "/backlog/portal.js?v=stable-xlsx-17";
+    script.src = "/backlog/portal.js?v=arruamento-click-18";
     script.onload = () => resolve();
     script.onerror = () => { script.remove(); scriptReady = null; reject(new Error("Não foi possível carregar o portal de pedidos.")); };
     document.head.appendChild(script);
@@ -29,7 +29,7 @@ function loadArruamentoScript() {
   if (window.SferaArruamentoMount) return Promise.resolve();
   if (!arruamentoScriptReady) arruamentoScriptReady = new Promise<void>((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "/backlog/arruamento.js?v=5";
+    script.src = "/backlog/arruamento.js?v=6";
     script.onload = () => resolve();
     script.onerror = () => { script.remove(); arruamentoScriptReady = null; reject(new Error("Não foi possível carregar o módulo de Arruamento.")); };
     document.head.appendChild(script);

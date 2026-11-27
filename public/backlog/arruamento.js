@@ -18,7 +18,6 @@ window.SferaArruamentoMount = function (root) {
     const button = document.createElement('button');
     button.dataset.view = 'arruamento';
     button.innerHTML = '<span>⌖</span>Arruamento';
-    button.addEventListener('click', () => window.SferaBacklogView?.('arruamento'));
     dashboardMenu.after(button);
   }
 
@@ -26,7 +25,7 @@ window.SferaArruamentoMount = function (root) {
     const frame = section.querySelector('iframe');
     if (!frame || event.source !== frame.contentWindow || event.origin !== window.location.origin || event.data?.type !== 'sfera-arruamento:altura') return;
     const height = event.data.height;
-    if (typeof height === 'number' && Number.isFinite(height)) frame.style.height = `${Math.max(800, Math.min(20000, Math.ceil(height))}px`;
+    if (typeof height === 'number' && Number.isFinite(height)) frame.style.height = `${Math.max(800, Math.min(20000, Math.ceil(height)))}px`;
   });
   window.SferaArruamentoRender = () => { section.hidden = false; };
   window.SferaArruamentoAccess = () => {};
