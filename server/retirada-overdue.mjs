@@ -87,8 +87,15 @@ function overdueCandidates(base, asOf) {
 
 const dataDirectory = () => process.env.ACCESS_DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || path.join(process.cwd(), "data");
 const eventsFile = () => path.join(dataDirectory(), "retirada-overdue-events.json");
+const dailyRunsFile = () => path.join(dataDirectory(), "retirada-overdue-daily-runs.json");
 let fileWrite = Promise.resolve();
-let lastCapturedKey = "";
+
+function dateInSaoPaulo(value) {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) return "";
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+}
 
 function dateOnly(value) {
   if (value instanceof Date && Number.isFinite(value.getTime())) return value.toISOString().slice(0, 10);
@@ -113,31 +120,44 @@ async function readFileEvents() {
   catch (error) { if (error?.code === "ENOENT") return []; throw error; }
 }
 
-async function persistFileEvents(candidates) {
+async function readFileDailyRuns() {
+  try { return JSON.parse(await fs.readFile(dailyRunsFile(), "utf8")); }
+  catch (error) { if (error?.code === "ENOENT") return {}; throw error; }
+}
+
+async function recordFileDailyRun(asOf, candidates, sourceImportedAt) {
   const write = fileWrite.catch(() => {}).then(async () => {
+    const dailyRuns = await readFileDailyRuns();
+    if (dailyRuns[asOf]) return;
     const current = await readFileEvents();
     const keys = new Set(current.map((item) => `${item.storeCode}|${item.orderCode}`));
     const added = candidates.filter((item) => { const key = `${item.storeCode}|${item.orderCode}`; if (keys.has(key)) return false; keys.add(key); return true; });
+    const directory = dataDirectory();
+    await fs.mkdir(directory, { recursive: true });
     if (added.length) {
-      const target = eventsFile(); await fs.mkdir(path.dirname(target), { recursive: true });
-      const temp = `${target}.${randomUUID()}.tmp`;
+      const target = eventsFile(); const temp = `${target}.${randomUUID()}.tmp`;
       await fs.writeFile(temp, JSON.stringify([...current, ...added]), { flag: "wx", mode: 0o600 }); await fs.rename(temp, target);
     }
-    return [...current, ...added];
+    dailyRuns[asOf] = { sourceImportedAt, completedAt: new Date().toISOString(), eventCount: added.length };
+    const target = dailyRunsFile(); const temp = `${target}.${randomUUID()}.tmp`;
+    await fs.writeFile(temp, JSON.stringify(dailyRuns), { flag: "wx", mode: 0o600 }); await fs.rename(temp, target);
   });
   fileWrite = write;
   return write;
 }
 
-export async function recordNewlyOverdueOrders(base) {
-  const asOf = isoToday();
-  const captureKey = `${base?.version || base?.importedAt || "empty"}|${asOf}`;
-  if (captureKey === lastCapturedKey) return;
+export async function recordNewlyOverdueOrders(base, asOf = isoToday()) {
+  const sourceImportedAt = base?.importsByType?.pickup?.importedAt
+    || ((base?.rows || []).some((row) => isRetiradaDeliveryType(row.delivery)) ? base?.importedAt : null);
+  // A backlog from yesterday must never be used to create today's apuração.
+  if (!sourceImportedAt || dateInSaoPaulo(sourceImportedAt) !== asOf) return;
   const candidates = overdueCandidates(base, asOf);
   if (databaseConfigured()) {
     const sql = getSql(); await ensureSchema(sql);
     await sql.begin(async (tx) => {
       await tx`select pg_advisory_xact_lock(727026)`;
+      const [existingRun] = await tx`select overdue_date from public.retirada_overdue_daily_runs where overdue_date = ${asOf}::date`;
+      if (existingRun) return;
       for (let start = 0; start < candidates.length; start += 500) {
         const batch = candidates.slice(start, start + 500).map((event) => ({
           id: event.id, store_code: event.storeCode, store_name: event.store, order_code: event.orderCode,
@@ -146,9 +166,9 @@ export async function recordNewlyOverdueOrders(base) {
         }));
         await tx`insert into public.retirada_overdue_events ${tx(batch, "id", "store_code", "store_name", "order_code", "cycle", "capture_date", "overdue_date", "delivery_type", "capture_time")} on conflict (store_code, order_code) do nothing`;
       }
+      await tx`insert into public.retirada_overdue_daily_runs (overdue_date, source_imported_at, event_count) values (${asOf}::date, ${sourceImportedAt}::timestamptz, ${candidates.length}) on conflict (overdue_date) do nothing`;
     });
-  } else await persistFileEvents(candidates);
-  lastCapturedKey = captureKey;
+  } else await recordFileDailyRun(asOf, candidates, sourceImportedAt);
 }
 
 export async function listRetiradaOverdueEvents() {
